@@ -231,7 +231,7 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
       <button id="resetBot">Put robot back</button>
       <span class="sep"></span>
       <button data-view="plain" class="on">Plain</button>
-      <button data-view="light">Light map</button>
+      <button data-view="light">Light sensors</button>
       <button data-view="magnetic">Magnetic</button>
       <button data-view="sonar">Sonar</button>
     </div>
@@ -1442,81 +1442,61 @@ async function loop() {
 const cv = document.getElementById("room"), ctx = cv.getContext("2d");
 const S = cv.width / ROOM;
 
-/* ---- the three ways of looking at the room ------------------------------
-   A light map is worth more than a number: the children can see the pool a
-   torch makes, the shadow a sofa throws, and why a sensor reads what it
-   reads. Sampled on a grid, the same illuminance the sensors use. */
-const HEAT_N = 44;
-const heat = document.createElement("canvas");
-heat.width = heat.height = HEAT_N;
-const hctx = heat.getContext("2d");
-let heatAt = 0, heatStale = true;
+/* ---- three ways of looking at the room ---------------------------------
+   Each one shows the numbers the program is actually reading, next to the
+   thing that is reading them. A picture of the light is less use than the
+   two values the robot is comparing. */
 
-function heatColour(t) {
-  // dark blue, violet, orange, pale yellow - dark is dim, pale is bright
-  const stops = [[10, 14, 40], [70, 30, 120], [190, 60, 90], [255, 150, 40], [255, 240, 170]];
-  const u = clamp(t, 0, 1) * (stops.length - 1);
-  const i = Math.min(stops.length - 2, Math.floor(u)), f = u - i;
-  return [0, 1, 2].map(k => Math.round(stops[i][k] + (stops[i + 1][k] - stops[i][k]) * f));
-}
-
-function buildHeat() {
-  const img = hctx.createImageData(HEAT_N, HEAT_N);
-  const vals = new Float32Array(HEAT_N * HEAT_N);
-  let max = 1e-6;
-  for (let j = 0; j < HEAT_N; j++) {
-    for (let i = 0; i < HEAT_N; i++) {
-      const e = illuminance((i + 0.5) * ROOM / HEAT_N, (j + 0.5) * ROOM / HEAT_N, null, null);
-      vals[j * HEAT_N + i] = e;
-      if (e > max) max = e;
+// what each eye sees, drawn at the eye
+function drawLightEyes() {
+  for (const b of world.bots) {
+    const L = readLightSensor(b, "L"), R = readLightSensor(b, "R");
+    const pl = sensorPoint(b, BOT.senFwd, -BOT.senSide);
+    const pr = sensorPoint(b, BOT.senFwd, BOT.senSide);
+    for (const [pt, v] of [[pl, L], [pr, R]]) {
+      const t = clamp(v / 1023, 0, 1);
+      ctx.beginPath(); ctx.arc(pt.x * S, pt.y * S, (7 + 9 * t) * S, 0, 7);
+      ctx.fillStyle = "rgba(255," + Math.round(200 + 55 * t) + "," + Math.round(80 + 120 * t) + "," + (0.25 + 0.6 * t) + ")";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,230,150,0.9)"; ctx.lineWidth = 1.2; ctx.stroke();
     }
+    const brighter = L === R ? "the same" : (L > R ? "left is brighter" : "right is brighter");
+    infoBubble("L " + L + "   R " + R + "   \u2013 " + brighter,
+               b.x * S, (b.y + 150) * S, L === R ? "#9aa7bd" : "#ffd76a");
   }
-  for (let k = 0; k < vals.length; k++) {
-    const c = heatColour(Math.pow(vals[k] / max, 0.45));
-    img.data[k * 4] = c[0]; img.data[k * 4 + 1] = c[1]; img.data[k * 4 + 2] = c[2];
-    img.data[k * 4 + 3] = 215;
+  for (const m of world.mbits) {
+    if (m.bot) continue;
+    infoBubble("light level " + readScreenLight(m), m.x * S, (m.y + 95) * S, m.colour);
   }
-  hctx.putImageData(img, 0, 0);
-  heatStale = false; heatAt = Date.now();
+  overlayNote("What each light sensor reads, 0 to 1023. This is the comparison the program makes.");
 }
 
-function drawLightMap() {
-  if (heatStale || Date.now() - heatAt > 220) buildHeat();
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(heat, 0, 0, cv.width, cv.height);
-  overlayNote("Light map - pale is bright, dark is shadow. The same numbers the light sensors read.");
-}
-
-// the Earth's field is the same everywhere in a room, and that is the point
+// the field is the same everywhere, so the interesting part is each board's heading
 function drawMagneticMap() {
-  ctx.fillStyle = "rgba(10,12,20,0.72)"; ctx.fillRect(0, 0, cv.width, cv.height);
-  const step = cv.width / 9, ang = -Math.PI / 2 - FIELD.declination * Math.PI / 180;
-  ctx.strokeStyle = "rgba(91,192,235,0.85)"; ctx.fillStyle = "rgba(91,192,235,0.85)";
-  ctx.lineWidth = 1.6;
+  const step = cv.width / 10, ang = -Math.PI / 2 - FIELD.declination * Math.PI / 180;
+  ctx.strokeStyle = "rgba(91,192,235,0.30)"; ctx.fillStyle = "rgba(91,192,235,0.30)";
+  ctx.lineWidth = 1.3;
   for (let y = step / 2; y < cv.height; y += step) {
     for (let x = step / 2; x < cv.width; x += step) {
-      const len = step * 0.3, dx = Math.cos(ang) * len, dy = Math.sin(ang) * len;
+      const len = step * 0.26, dx = Math.cos(ang) * len, dy = Math.sin(ang) * len;
       ctx.beginPath(); ctx.moveTo(x - dx, y - dy); ctx.lineTo(x + dx, y + dy); ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(x + dx, y + dy);
-      ctx.lineTo(x + dx - dy * 0.3 - dx * 0.3, y + dy + dx * 0.3 - dy * 0.3);
-      ctx.lineTo(x + dx + dy * 0.3 - dx * 0.3, y + dy - dx * 0.3 - dy * 0.3);
-      ctx.closePath(); ctx.fill();
     }
   }
-  overlayNote("Magnetic field: " + FIELD.total + " \u00b5T, " + FIELD.inclination +
-              "\u00b0 below horizontal, so only " +
-              (FIELD.total * Math.cos(FIELD.inclination * Math.PI / 180)).toFixed(1) +
-              " \u00b5T is horizontal. The same everywhere - only the robot's heading changes.");
+  for (const m of world.mbits) {
+    const pt = placeOf(m);
+    infoBubble(compassHeadingDeg(m) + "\u00b0   " + magneticForce(m, "x").toFixed(1) + " / " +
+               magneticForce(m, "y").toFixed(1) + " / " + magneticForce(m, "z").toFixed(0) + " \u00b5T",
+               pt.x * S, (pt.y + (m.bot ? 150 : 95)) * S, m.colour);
+  }
+  overlayNote("Compass heading and the field on each axis. " + FIELD.total + " \u00b5T, " +
+              FIELD.inclination + "\u00b0 down, the same everywhere - only the heading changes.");
 }
 
 // the sonar cone, ray by ray, and what comes back
 function drawSonarMap() {
-  ctx.fillStyle = "rgba(10,12,20,0.55)"; ctx.fillRect(0, 0, cv.width, cv.height);
   for (const b of world.bots) {
     const c = Math.cos(b.h), sn = Math.sin(b.h);
     const ox = b.x + c * BOT.sonarFwd, oy = b.y + sn * BOT.sonarFwd;
-    let best = Infinity;
     for (let i = -3; i <= 3; i++) {
       const a = b.h + i * 0.044;
       const d = rayDistance(ox, oy, a);
@@ -1531,15 +1511,16 @@ function drawSonarMap() {
         ctx.beginPath();
         ctx.arc((ox + Math.cos(a) * d) * S, (oy + Math.sin(a) * d) * S, 3 * S, 0, 7);
         ctx.fillStyle = "rgba(91,192,235,0.9)"; ctx.fill();
-        if (d < best) best = d;
       }
     }
     const cm = readSonar(b);
-    nameBubble(cm === 0 ? "nothing within 2 m" : cm + " cm",
-               ox * S, (oy - 90) * S, cm === 0 ? "#e8575a" : "#5bc0eb");
+    infoBubble(cm === 0 ? "nothing within 2 m" : cm + " cm",
+               ox * S, (oy + 150) * S, cm === 0 ? "#e8575a" : "#5bc0eb");
   }
-  overlayNote("Sonar: a 15\u00b0 cone of pings. Red rays found nothing or hit too steep an angle to echo back.");
+  overlayNote("A 15\u00b0 cone of pings. Red rays found nothing, or hit a wall too steeply to echo back.");
 }
+
+const infoBubble = (text, x, y, colour) => nameBubble(text, x, y, colour);
 
 function overlayNote(text) {
   const f = Math.round(12 * (cv.width / 1100));
@@ -1598,9 +1579,6 @@ function draw() {
   paint(SHADOWS.room, 0.26);
   for (const set of SHADOWS.lamps) paint(set, 0.42);
 
-  if (world.view === "light") drawLightMap();
-  if (world.view === "magnetic") drawMagneticMap();
-
   // the furniture
   for (const b of world.boxes) {
     ctx.save();
@@ -1657,6 +1635,8 @@ function draw() {
 
   for (const b of world.bots) drawBot(b);
   for (const m of world.mbits) if (!botOf(m)) drawBoard(m);
+  if (world.view === "light") drawLightEyes();
+  if (world.view === "magnetic") drawMagneticMap();
   if (world.view === "sonar") drawSonarMap();
 
   // which way is north
@@ -1708,7 +1688,9 @@ function nameBubble(text, x, yBottom, colour) {
   const f = Math.round(11.5 * (cv.width / 1100));
   ctx.font = "bold " + f + "px system-ui, sans-serif";
   const padX = f * 0.55, h = f * 1.75, w = ctx.measureText(text).width + padX * 2;
-  const top = yBottom - h - f * 0.45;
+  // keep the bubble inside the room, whichever edge the thing is standing near
+  const top = clamp(yBottom - h - f * 0.45, 4, cv.height - h - 6);
+  x = clamp(x, w / 2 + 4, cv.width - w / 2 - 4);
   ctx.fillStyle = "rgba(13,16,23,0.9)";
   ctx.strokeStyle = colour; ctx.lineWidth = 1.5;
   roundRect(x - w / 2, top, w, h, h * 0.42);
@@ -1913,7 +1895,6 @@ function paint(a, b) {
 
 document.querySelectorAll("[data-view]").forEach(btn => btn.addEventListener("click", () => {
   world.view = btn.dataset.view;
-  heatStale = true;
   document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", b === btn));
   draw();
 }));
@@ -1932,17 +1913,17 @@ el("torch").addEventListener("click", e => {
   world.lamps.forEach(L => L.on = !anyOn);
   e.target.textContent = anyOn ? "All torches off" : "All torches on";
   e.target.classList.toggle("on", !anyOn);
-  heatStale = true; draw(); instruments();
+  draw(); instruments();
 });
 el("addLamp").addEventListener("click", () => {
   if (world.lamps.length >= 6) return;
   world.lamps.push({ x: 400 + world.lamps.length * 220, y: 1800, on: true });
-  heatStale = true; draw(); instruments();
+  draw(); instruments();
 });
 el("delLamp").addEventListener("click", () => {
   if (world.lamps.length <= 1) return;
   world.lamps.pop();
-  heatStale = true; draw(); instruments();
+  draw(); instruments();
 });
 el("clearLine").addEventListener("click", () => { fctx.clearRect(0, 0, FLOOR_N, FLOOR_N); refreshFloor(); draw(); });
 el("addBox").addEventListener("click", () => {
