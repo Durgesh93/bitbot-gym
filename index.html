@@ -1327,22 +1327,35 @@ function makeApi(m) {
   const armRange = arm => arm === "L" ? [0, 6] : arm === "R" ? [6, 12] : [0, 12];
   const stopWheel = w => { if (w === "L") b.lm = 0; else if (w === "R") b.rm = 0; else { b.lm = 0; b.rm = 0; } };
   const setWheels = (l, r) => { b.lm = l; b.rm = r; };
-  /* The PRO counts its wheels round. Waiting a length of time worked out from
-     the commanded speed always falls short, because a wheel takes a moment to
-     get up to speed and never quite reaches what it was asked for - so wait on
-     the wheels themselves, the way the real board does. */
-  const runWheels = async (mm) => {
-    const l0 = b.enc.l, r0 = b.enc.r, want = Math.abs(mm);
-    let lastSeen = 0, stuckFor = 0;
+  /* "go 20 cm", "spin 90 degrees" and "arc 90 degrees" are the three blocks the
+     PRO does not do with its motors directly: it hands the job to the controller
+     on the motor board, which counts the wheels round and runs its own loop until
+     the job is done. So the gym counts the wheels too, and eases off near the end
+     the way that controller does - otherwise the robot sails past its target. */
+  const runCounting = async (want, measure) => {
+    const l0 = b.enc.l, r0 = b.enc.r;
+    let lastSeen = 0, stuckFor = 0, eased = false;
     for (;;) {
-      const gone = (Math.abs(b.enc.l - l0) + Math.abs(b.enc.r - r0)) / 2;
-      if (gone >= want) return;
-      stuckFor = gone - lastSeen < 0.05 ? stuckFor + 10 : 0;
+      const gone = measure(b.enc.l - l0, b.enc.r - r0);
+      const left = want - gone;
+      if (left <= 0) return;
+      if (left < want * 0.25 && left < 60 && !eased) {      // the last stretch, taken slowly
+        eased = true;
+        const f = 22 / Math.max(Math.abs(b.lm), Math.abs(b.rm), 1);
+        if (f < 1) { b.lm *= f; b.rm *= f; }
+      }
+      stuckFor = gone - lastSeen < 0.05 ? stuckFor + 5 : 0;
       lastSeen = gone;
       if (stuckFor > 2000) { sayd("the wheels are not turning - something is in the way"); return; }
-      await wait(m, 10);
+      await wait(m, 5);
     }
   };
+  // how far it has gone: the two wheels averaged
+  const runWheels = (mm) => runCounting(Math.abs(mm), (dl, dr) => (Math.abs(dl) + Math.abs(dr)) / 2);
+  // how far it has TURNED: the difference between the wheels, which is all a
+  // robot with two wheels ever knows about its own heading
+  const runTurn = (deg) => runCounting(Math.abs(deg) * Math.PI / 180 * BOT.axle,
+                                       (dl, dr) => Math.abs(dl - dr));
   const addon = (group, name) =>
     once(m, "addon:" + group, "note: " + name + " needs the " + group + " add-on, which the gym has not got");
 
@@ -1410,11 +1423,12 @@ function makeApi(m) {
     },
 
     /* ---------------- driving, the old 0 to 1023 blocks ---------------- */
-    motor: (m, speed) => {
+    motor: (which, speed) => {
       const pct = clamp(speed, -1023, 1023) / 1023 * 100;
-      if (m === "L") b.lm = pct; else if (m === "R") b.rm = pct; else setWheels(pct, pct);
+      if (which === "L") b.lm = pct; else if (which === "R") b.rm = pct; else setWheels(pct, pct);
       once(m, "scale1023", "note: motor, drive and driveTurn run on 0 to 1023, not 0 to 100");
-      sayd("motor " + (m === "L" ? "left" : m === "R" ? "right" : "both") + " at " + speed + " of 1023");
+      sayd("motor " + (which === "L" ? "left" : which === "R" ? "right" : "both") +
+          " at " + speed + " of 1023");
     },
     drive: (speed) => bitbot.motor("B", speed),
     driveMilliseconds: async (speed, ms) => { bitbot.motor("B", speed); await wait(m, ms); stopWheel("B"); },
@@ -1435,9 +1449,7 @@ function makeApi(m) {
     spinDeg: async (dir, speed, angle) => {
       if (proOnly(m, b, "spinDeg")) return;
       bitbot.rotate(dir, speed);
-      // turning on the spot, each wheel walks round a circle half an axle wide
-      if (wheelSpeed(b, clamp(speed, 0, 100)) > 0)
-        await runWheels(Math.abs(angle) * Math.PI / 180 * BOT.axle / 2);
+      if (wheelSpeed(b, clamp(speed, 0, 100)) > 0) await runTurn(angle);
       bitbot.stop("brake");
     },
     arc: (dir, speed, radius) => {
@@ -1453,8 +1465,7 @@ function makeApi(m) {
     arcdeg: async (dir, speed, radius, angle) => {
       if (proOnly(m, b, "arcdeg")) return;
       bitbot.arc(dir, speed, radius);
-      const R = Math.max(radius, 7) * 10;
-      if (wheelSpeed(b, speed) > 0) await runWheels(Math.abs(angle) * Math.PI / 180 * R);
+      if (wheelSpeed(b, speed) > 0) await runTurn(angle);
       bitbot.stop("brake");
     },
     steer: (direction, speed) => {
@@ -1476,8 +1487,8 @@ function makeApi(m) {
     },
     turnAngle: () => proOnly(m, b, "turnAngle") ? 0
       : Math.round((b.enc.l - b.enc.r) / BOT.axle * 180 / Math.PI),
-    resetWheelSensors: (m) => {
-      if (m === "L") b.enc.l = 0; else if (m === "R") b.enc.r = 0; else { b.enc.l = 0; b.enc.r = 0; }
+    resetWheelSensors: (which) => {
+      if (which === "L") b.enc.l = 0; else if (which === "R") b.enc.r = 0; else { b.enc.l = 0; b.enc.r = 0; }
     },
     lastEncoderError: () => proOnly(m, b, "lastEncoderError") ? 0 : 0,
     motorTrim: () => proOnly(m, b, "motorTrim"),
