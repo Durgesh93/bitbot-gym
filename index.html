@@ -157,6 +157,11 @@ table.read td.v { text-align: right; font-family: var(--f-mono); font-variant-nu
 .sliders input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
 .sliders b { font-family: var(--f-mono); color: var(--fg); font-weight: 500; text-align: right; }
 footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
+/* naming a thing you have just put in the room */
+.objname { position: fixed; z-index: 60; width: 180px; text-align: center;
+  font-size: 13px; padding: 6px 10px; border-radius: 9px;
+  border: 1.5px solid var(--accent); background: #0d1017; color: var(--fg);
+  box-shadow: 0 6px 20px rgba(0,0,0,.5); }
 </style>
 </head>
 <body>
@@ -212,16 +217,13 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
     <div id="roomHome">
     <canvas id="room" width="1100" height="1100"></canvas>
     <div class="tools" id="roomTools">
-      <button id="addCeil">Add ceiling light</button>
-      <button id="addFloor">Add floor light</button>
-      <button id="delLamp">Remove light</button>
       <span class="sep"></span>
       <button data-tool="move" class="on">Drag things</button>
       <button data-tool="pen">Draw line</button>
       <button data-tool="erase">Erase line</button>
       <button id="clearLine">Clear floor</button>
       <span class="sep"></span>
-      <button id="addBox">Add box</button>
+      <button id="addBox">Add object</button>
       <button id="furnish">Furnish room</button>
       <button id="clearBoxes">Empty room</button>
       <span class="sep"></span>
@@ -232,6 +234,7 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
       <button data-view="light">Light sensors</button>
       <button data-view="magnetic">Magnetic</button>
       <button data-view="sonar">Sonar</button>
+      <span class="sep"></span>
     </div>
     </div>
     <div class="toprow">
@@ -273,6 +276,10 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
   </section>
 
 </div>
+
+<input id="objName" class="objname" list="objList" placeholder="what is it? (empty removes it)" hidden
+       autocomplete="off" spellcheck="false" maxlength="22">
+<datalist id="objList"></datalist>
 
 <footer>
   A simulation, not a promise. Battery level, wheel slip, the floor and the classroom lights all move the real numbers &mdash; the real Bit:Bot still gets the final word.
@@ -340,8 +347,8 @@ function makeDevice(kind, name, colour, x, y) {
 
 const world = {
   mbits: [], bots: [], sel: 0,
-  lamps: [{ x: 1000, y: 1000, on: true, kind: "ceiling" }],
-  view: "plain",
+  lamps: [],
+  show: { light: false, magnetic: false, sonar: false },
   boxes: [],
   showTrail: true
 };
@@ -496,14 +503,78 @@ function physics(dt) {
   shadowsStale = true;
 }
 
+/* What a thing is decides how big it is, how tall, and how much light
+   bounces off it. A whiteboard throws light around a room; a black
+   backpack swallows it. The children can see that in the sensor numbers. */
+const CATALOGUE = {
+  "table":      { w: 470, h: 330, z: 240, fill: "#8a5a32", reflect: 0.35 },
+  "chair":      { w: 190, h: 190, z: 450, fill: "#7a5230", reflect: 0.30 },
+  "sofa":       { w: 300, h: 640, z: 300, fill: "#3f5a7a", reflect: 0.20 },
+  "wall":       { w: 760, h: 90,  z: 900, fill: "#8d96a6", reflect: 0.55 },
+  "whiteboard": { w: 620, h: 70,  z: 900, fill: "#e8edf5", reflect: 0.85 },
+  "mirror":     { w: 320, h: 45,  z: 700, fill: "#cfe3f0", reflect: 0.95 },
+  "projector":  { w: 200, h: 150, z: 130, fill: "#d3d8e2", reflect: 0.60 },
+  "screen":     { w: 620, h: 60,  z: 950, fill: "#f2f4f8", reflect: 0.88 },
+  "bookcase":   { w: 230, h: 620, z: 420, fill: "#6b4b2e", reflect: 0.25 },
+  "cupboard":   { w: 300, h: 500, z: 800, fill: "#5d4733", reflect: 0.28 },
+  "toy box":    { w: 420, h: 200, z: 190, fill: "#4e6b45", reflect: 0.30 },
+  "plant":      { w: 260, h: 250, z: 520, fill: "#2f6b43", reflect: 0.18, round: true },
+  "bin":        { w: 180, h: 180, z: 350, fill: "#3b4250", reflect: 0.15, round: true },
+  "backpack":   { w: 180, h: 140, z: 230, fill: "#2d3b55", reflect: 0.12 },
+  "pencil box": { w: 120, h: 65,  z: 50,  fill: "#c0483a", reflect: 0.45 },
+  "notebook":   { w: 140, h: 100, z: 20,  fill: "#f0f2f6", reflect: 0.72 },
+  "paper":      { w: 150, h: 110, z: 8,   fill: "#fbfcfe", reflect: 0.80 },
+  "pen":        { w: 80,  h: 20,  z: 15,  fill: "#2b2f38", reflect: 0.25 },
+  "book":       { w: 150, h: 110, z: 35,  fill: "#8a3b52", reflect: 0.35 },
+  "box":        { w: 300, h: 150, z: 260, fill: "#50596b", reflect: 0.40 },
+  "ceiling light": { light: "ceiling" },
+  "floor light":   { light: "floor" },
+  "lamp":          { light: "floor" },
+  "torch":         { light: "floor" }
+};
+
+// which names mean a light rather than a thing light falls on
+function lightKind(name) {
+  const spec = CATALOGUE[String(name || "").trim().toLowerCase()];
+  if (spec && spec.light) return spec.light;
+  const n = String(name || "").toLowerCase();
+  if (/ceiling light|ceiling lamp/.test(n)) return "ceiling";
+  if (/\blight\b|\blamp\b|torch|bulb/.test(n)) return "floor";
+  return null;
+}
+
+// a name we have never heard of still gets a sensible guess
+function lookUp(name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (CATALOGUE[n]) return Object.assign({}, CATALOGUE[n]);
+  for (const k in CATALOGUE) if (n && (n.includes(k) || k.includes(n))) return Object.assign({}, CATALOGUE[k]);
+  const pale = /white|paper|mirror|silver|shiny|glass|screen|light/.test(n);
+  const dark = /black|dark|navy|charcoal|cloth|fabric|felt|carpet/.test(n);
+  return { w: 260, h: 160, z: 200, fill: dark ? "#2a2f3a" : pale ? "#dde3ec" : "#50596b",
+           reflect: dark ? 0.12 : pale ? 0.78 : 0.40 };
+}
+
+function nameObject(bx, name) {
+  const spec = lookUp(name);
+  if (!spec.w) return;                     // a light has no body to resize
+  const cx = bx.x + bx.w / 2, cy = bx.y + bx.h / 2;
+  bx.name = String(name || "").trim() || "box";
+  bx.w = spec.w; bx.h = spec.h; bx.z = spec.z;
+  bx.fill = spec.fill; bx.reflect = spec.reflect; bx.round = !!spec.round;
+  bx.x = clamp(cx - bx.w / 2, 0, ROOM - bx.w);
+  bx.y = clamp(cy - bx.h / 2, 0, ROOM - bx.h);
+  shadowsStale = true;
+}
+
 function furnish() {
-  world.boxes = [
-    { x: 120,  y: 240,  w: 230, h: 620, z: 420, name: "bookcase", fill: "#6b4b2e" },
-    { x: 620,  y: 400,  w: 470, h: 330, z: 240, name: "table",    fill: "#8a5a32" },
-    { x: 1560, y: 980,  w: 300, h: 640, z: 300, name: "sofa",     fill: "#3f5a7a" },
-    { x: 1420, y: 180,  w: 420, h: 200, z: 190, name: "toy box",  fill: "#4e6b45" },
-    { x: 430,  y: 1640, w: 260, h: 250, z: 520, name: "plant",    fill: "#2f6b43", round: true }
-  ];
+  const place = [["bookcase", 120, 240], ["table", 620, 400], ["sofa", 1560, 980],
+                 ["toy box", 1420, 180], ["plant", 430, 1640], ["whiteboard", 700, 70]];
+  world.boxes = place.map(([name, x, y]) => {
+    const bx = { x: x, y: y, w: 10, h: 10 };
+    nameObject(bx, name);
+    bx.x = x; bx.y = y;
+    return bx;
+  });
 }
 
 /* ---- light ------------------------------------------------------------
@@ -554,7 +625,7 @@ let shadowsStale = true;
 let SHADOWS = { lamps: [] };                  // for drawing: furniture and every robot
 let SEEN = { lamps: [] };                     // for sensing: the same, tagged with who cast it
 function buildShadows() {
-  const casters = world.boxes.map(bx => ({ box: bx, owner: null })).concat(
+  const casters = world.boxes.map(bx => ({ box: bx, owner: bx })).concat(
     world.bots.map(b => ({
       box: { x: b.x - BOT.radius, y: b.y - BOT.radius, w: BOT.radius * 2, h: BOT.radius * 2, z: 95 },
       owner: b
@@ -562,6 +633,8 @@ function buildShadows() {
   SEEN.lamps = world.lamps.map(L => L.on
     ? casters.map(c => ({ poly: shadowQuad(c.box, { x: L.x, y: L.y, H: lampH(L) }), owner: c.owner })) : []);
   SHADOWS.lamps = SEEN.lamps.map(set => set.map(e => e.poly));
+  shadowsStale = false;        // before the bounce, or it asks for shadows again
+  buildBounce();
 }
 function inShadow(x, y, which, self) {
   const set = SEEN.lamps[which] || [];
@@ -583,7 +656,24 @@ function lampsOn() {
   return out;
 }
 // illuminance in arbitrary but consistent units; facing is a heading, or null for "pointing at the ceiling"
-function illuminance(x, y, facing, self) {
+let BOUNCE = [];
+// each lit object throws a little of that light back into the room
+function buildBounce() {
+  BOUNCE = [];
+  for (const bx of world.boxes) {
+    const r = bx.reflect == null ? 0.4 : bx.reflect;
+    if (r < 0.05) continue;
+    const cx = bx.x + bx.w / 2, cy = bx.y + bx.h / 2;
+    const e = illuminance(cx, cy, null, bx, false);
+    if (e < 0.02) continue;
+    // the lit face is what throws light back: the top, or the sides if it stands tall
+    const face = Math.max(bx.w * bx.h, 2 * (bx.w + bx.h) * (bx.z || 100));
+    const area = Math.min(1.6, face / 3e5);
+    BOUNCE.push({ x: cx, y: cy, I: r * e * 0.35 * area });
+  }
+}
+
+function illuminance(x, y, facing, self, withBounce) {
   if (shadowsStale) { buildShadows(); shadowsStale = false; }
   let e = anyCeiling() ? 0.05 : 0.004;          // light bouncing round the room          // light bouncing round the room
   for (const L of lampsOn()) {
@@ -599,6 +689,12 @@ function illuminance(x, y, facing, self) {
     if (inShadow(x, y, L.key, self)) continue;       // this spot is in that lamp's shadow
     const h2 = (L.H / 1000) * (L.H / 1000);          // the lamp is up in the air, not on the floor
     e += L.I * aim / (d2 + h2 + 0.09);               // inverse square, softened close up
+  }
+  if (withBounce !== false) {
+    for (const B of BOUNCE) {
+      const dx = B.x - x, dy = B.y - y;
+      e += B.I / ((dx * dx + dy * dy) / 1e6 + 0.3);
+    }
   }
   return e;
 }
@@ -1444,80 +1540,94 @@ const S = cv.width / ROOM;
    thing that is reading them. A picture of the light is less use than the
    two values the robot is comparing. */
 
-// what each eye sees, drawn at the eye
-function drawLightEyes() {
-  for (const b of world.bots) {
-    const L = readLightSensor(b, "L"), R = readLightSensor(b, "R");
-    const pl = sensorPoint(b, BOT.senFwd, -BOT.senSide);
-    const pr = sensorPoint(b, BOT.senFwd, BOT.senSide);
-    for (const [pt, v] of [[pl, L], [pr, R]]) {
-      const t = clamp(v / 1023, 0, 1);
-      ctx.beginPath(); ctx.arc(pt.x * S, pt.y * S, (7 + 9 * t) * S, 0, 7);
-      ctx.fillStyle = "rgba(255," + Math.round(200 + 55 * t) + "," + Math.round(80 + 120 * t) + "," + (0.25 + 0.6 * t) + ")";
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,230,150,0.9)"; ctx.lineWidth = 1.2; ctx.stroke();
-    }
-    const brighter = L === R ? "the same" : (L > R ? "left is brighter" : "right is brighter");
-    infoBubble("L " + L + "   R " + R + "   \u2013 " + brighter,
-               b.x * S, (b.y + 150) * S, L === R ? "#9aa7bd" : "#ffd76a");
-  }
-  for (const m of world.mbits) {
-    if (m.bot) continue;
-    infoBubble("light level " + readScreenLight(m), m.x * S, (m.y + 95) * S, m.colour);
-  }
-  overlayNote("What each light sensor reads, 0 to 1023. This is the comparison the program makes.");
-}
+/* Each layer draws its own marks on the room and hands back a line of text
+   per device. The lines are then stacked under whatever they belong to, so
+   three layers at once read as three lines rather than three on top of
+   each other. */
+function drawOverlays() {
+  const show = world.show;
+  if (!show.light && !show.magnetic && !show.sonar) return;
+  const lines = new Map();
+  const add = (holder, text, colour) => {
+    if (!lines.has(holder)) lines.set(holder, []);
+    lines.get(holder).push({ text: text, colour: colour });
+  };
 
-// the field is the same everywhere, so the interesting part is each board's heading
-function drawMagneticMap() {
-  const step = cv.width / 10, ang = -Math.PI / 2 - FIELD.declination * Math.PI / 180;
-  ctx.strokeStyle = "rgba(91,192,235,0.30)"; ctx.fillStyle = "rgba(91,192,235,0.30)";
-  ctx.lineWidth = 1.3;
-  for (let y = step / 2; y < cv.height; y += step) {
-    for (let x = step / 2; x < cv.width; x += step) {
-      const len = step * 0.26, dx = Math.cos(ang) * len, dy = Math.sin(ang) * len;
-      ctx.beginPath(); ctx.moveTo(x - dx, y - dy); ctx.lineTo(x + dx, y + dy); ctx.stroke();
+  if (show.light) {
+    for (const b of world.bots) {
+      const L = readLightSensor(b, "L"), R = readLightSensor(b, "R");
+      for (const [pt, v] of [[sensorPoint(b, BOT.senFwd, -BOT.senSide), L],
+                             [sensorPoint(b, BOT.senFwd, BOT.senSide), R]]) {
+        const t = clamp(v / 1023, 0, 1);
+        ctx.beginPath(); ctx.arc(pt.x * S, pt.y * S, (7 + 9 * t) * S, 0, 7);
+        ctx.fillStyle = "rgba(255," + Math.round(200 + 55 * t) + "," +
+                        Math.round(80 + 120 * t) + "," + (0.25 + 0.6 * t) + ")";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,230,150,0.9)"; ctx.lineWidth = 1.2; ctx.stroke();
+      }
+      add(b, "eyes  L " + L + "   R " + R + "   " +
+             (L === R ? "level" : L > R ? "left brighter" : "right brighter"), "#ffd76a");
     }
+    for (const m of world.mbits) if (!m.bot) add(m, "light level " + readScreenLight(m), "#ffd76a");
   }
-  for (const m of world.mbits) {
-    const pt = placeOf(m);
-    infoBubble(compassHeadingDeg(m) + "\u00b0   " + magneticForce(m, "x").toFixed(1) + " / " +
-               magneticForce(m, "y").toFixed(1) + " / " + magneticForce(m, "z").toFixed(0) + " \u00b5T",
-               pt.x * S, (pt.y + (m.bot ? 150 : 95)) * S, m.colour);
-  }
-  overlayNote("Compass heading and the field on each axis. " + FIELD.total + " \u00b5T, " +
-              FIELD.inclination + "\u00b0 down, the same everywhere - only the heading changes.");
-}
 
-// the sonar cone, ray by ray, and what comes back
-function drawSonarMap() {
-  for (const b of world.bots) {
-    const c = Math.cos(b.h), sn = Math.sin(b.h);
-    const ox = b.x + c * BOT.sonarFwd, oy = b.y + sn * BOT.sonarFwd;
-    for (let i = -3; i <= 3; i++) {
-      const a = b.h + i * 0.044;
-      const d = rayDistance(ox, oy, a);
-      const far = isFinite(d) ? d : 2400;
-      ctx.strokeStyle = isFinite(d) ? "rgba(91,192,235,0.55)" : "rgba(232,87,90,0.35)";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(ox * S, oy * S);
-      ctx.lineTo((ox + Math.cos(a) * far) * S, (oy + Math.sin(a) * far) * S);
-      ctx.stroke();
-      if (isFinite(d)) {
-        ctx.beginPath();
-        ctx.arc((ox + Math.cos(a) * d) * S, (oy + Math.sin(a) * d) * S, 3 * S, 0, 7);
-        ctx.fillStyle = "rgba(91,192,235,0.9)"; ctx.fill();
+  if (show.magnetic) {
+    const step = cv.width / 10, ang = -Math.PI / 2 - FIELD.declination * Math.PI / 180;
+    ctx.strokeStyle = "rgba(91,192,235,0.26)"; ctx.lineWidth = 1.3;
+    for (let y = step / 2; y < cv.height; y += step) {
+      for (let x = step / 2; x < cv.width; x += step) {
+        const len = step * 0.26, dx = Math.cos(ang) * len, dy = Math.sin(ang) * len;
+        ctx.beginPath(); ctx.moveTo(x - dx, y - dy); ctx.lineTo(x + dx, y + dy); ctx.stroke();
       }
     }
-    const cm = readSonar(b);
-    infoBubble(cm === 0 ? "nothing within 2 m" : cm + " cm",
-               ox * S, (oy + 150) * S, cm === 0 ? "#e8575a" : "#5bc0eb");
+    for (const m of world.mbits) {
+      add(m.bot || m, "compass " + compassHeadingDeg(m) + "\u00b0   " +
+          magneticForce(m, "x").toFixed(1) + " / " + magneticForce(m, "y").toFixed(1) +
+          " / " + magneticForce(m, "z").toFixed(0) + " \u00b5T", "#5bc0eb");
+    }
   }
-  overlayNote("A 15\u00b0 cone of pings. Red rays found nothing, or hit a wall too steeply to echo back.");
+
+  if (show.sonar) {
+    for (const b of world.bots) {
+      const c = Math.cos(b.h), sn = Math.sin(b.h);
+      const ox = b.x + c * BOT.sonarFwd, oy = b.y + sn * BOT.sonarFwd;
+      for (let i = -3; i <= 3; i++) {
+        const a = b.h + i * 0.044;
+        const d = rayDistance(ox, oy, a);
+        const far = isFinite(d) ? d : 2400;
+        ctx.strokeStyle = isFinite(d) ? "rgba(91,192,235,0.5)" : "rgba(232,87,90,0.3)";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(ox * S, oy * S);
+        ctx.lineTo((ox + Math.cos(a) * far) * S, (oy + Math.sin(a) * far) * S);
+        ctx.stroke();
+        if (isFinite(d)) {
+          ctx.beginPath();
+          ctx.arc((ox + Math.cos(a) * d) * S, (oy + Math.sin(a) * d) * S, 3 * S, 0, 7);
+          ctx.fillStyle = "rgba(91,192,235,0.9)"; ctx.fill();
+        }
+      }
+      const cm = readSonar(b);
+      add(b, cm === 0 ? "sonar  nothing within 2 m" : "sonar  " + cm + " cm",
+          cm === 0 ? "#e8575a" : "#5bc0eb");
+    }
+  }
+
+  // and now the captions, stacked under whatever they describe
+  const gap = Math.round(13 * (cv.width / 1100)) * 1.95;
+  lines.forEach((items, holder) => {
+    const isBot = world.bots.indexOf(holder) >= 0;
+    let y = (holder.y + (isBot ? 150 : 95)) * S;
+    for (const it of items) { nameBubble(it.text, holder.x * S, y, it.colour); y += gap; }
+  });
+
+  const on = [];
+  if (show.light) on.push("light sensors, 0 to 1023");
+  if (show.magnetic) on.push("compass and field, the same everywhere");
+  if (show.sonar) on.push("a 15\u00b0 cone of pings, red found nothing");
+  overlayNote("Showing: " + on.join("   \u00b7   "));
 }
 
-const infoBubble = (text, x, y, colour) => nameBubble(text, x, y, colour);
 
 function overlayNote(text) {
   const f = Math.round(12 * (cv.width / 1100));
@@ -1588,11 +1698,18 @@ function draw() {
     ctx.restore();
     ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.lineWidth = 1.5;
     if (!b.round) { roundRect(b.x * S, b.y * S, b.w * S, b.h * S, 6 * S); ctx.stroke(); }
-    if (b.name && b.w * S > 60) {
-      ctx.fillStyle = "rgba(255,255,255,0.5)";
-      ctx.font = Math.round(11 * (cv.width / 1100)) + "px system-ui, sans-serif";
+    if (b.unnamed) {
+      ctx.setLineDash([6, 5]);
+      ctx.strokeStyle = "rgba(91,192,235,0.95)"; ctx.lineWidth = 2;
+      roundRect(b.x * S, b.y * S, b.w * S, b.h * S, 6 * S); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    const label = b.unnamed ? "name it" : b.name;
+    if (label && b.w * S > 56) {
+      ctx.fillStyle = b.unnamed ? "rgba(91,192,235,0.95)" : "rgba(255,255,255,0.55)";
+      ctx.font = (b.unnamed ? "bold " : "") + Math.round(11 * (cv.width / 1100)) + "px system-ui, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(b.name, (b.x + b.w / 2) * S, (b.y + b.h / 2) * S + 4);
+      ctx.fillText(label, (b.x + b.w / 2) * S, (b.y + b.h / 2) * S + 4);
       ctx.textAlign = "left";
     }
   }
@@ -1615,9 +1732,7 @@ function draw() {
 
   for (const b of world.bots) drawBot(b);
   for (const m of world.mbits) if (!botOf(m)) drawBoard(m);
-  if (world.view === "light") drawLightEyes();
-  if (world.view === "magnetic") drawMagneticMap();
-  if (world.view === "sonar") drawSonarMap();
+  drawOverlays();
 
   // which way is north
   const nx = cv.width - 46 * (cv.width / 1100), ny = 46 * (cv.width / 1100), nr = 20 * (cv.width / 1100);
@@ -1897,35 +2012,103 @@ function paint(a, b) {
   if (!running) draw();
 }
 
+/* the three sensor layers are switches, not a choice: any of them can be on
+   together, because a robot is reading all three at once anyway */
+function refreshViewButtons() {
+  const any = world.show.light || world.show.magnetic || world.show.sonar;
+  document.querySelectorAll("[data-view]").forEach(b => {
+    const k = b.dataset.view;
+    b.classList.toggle("on", k === "plain" ? !any : !!world.show[k]);
+  });
+}
 document.querySelectorAll("[data-view]").forEach(btn => btn.addEventListener("click", () => {
-  world.view = btn.dataset.view;
-  document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", b === btn));
+  const k = btn.dataset.view;
+  if (k === "plain") world.show = { light: false, magnetic: false, sonar: false };
+  else world.show[k] = !world.show[k];
+  refreshViewButtons();
   draw();
 }));
 document.querySelectorAll("[data-tool]").forEach(btn => btn.addEventListener("click", () => {
   tool = btn.dataset.tool;
   document.querySelectorAll("[data-tool]").forEach(b => b.classList.toggle("on", b === btn));
 }));
-el("addCeil").addEventListener("click", () => addLamp("ceiling"));
-el("addFloor").addEventListener("click", () => addLamp("floor"));
-el("delLamp").addEventListener("click", () => {
-  if (!world.lamps.length) return;
-  world.lamps.pop();
-  draw(); instruments();
-});
-function addLamp(kind) {
-  if (world.lamps.length >= 8) return;
-  const n = world.lamps.length;
-  world.lamps.push({
-    x: 350 + (n % 4) * 430, y: kind === "ceiling" ? 500 + (n % 2) * 400 : 1750,
-    on: true, kind: kind
-  });
+el("clearLine").addEventListener("click", () => { fctx.clearRect(0, 0, FLOOR_N, FLOOR_N); refreshFloor(); draw(); });
+/* put something down, then say what it is - the name decides its size,
+   its height and how much light bounces off it */
+function addObject() {
+  const bx = { x: 0, y: 0, w: 10, h: 10 };
+  nameObject(bx, "box");
+  bx.unnamed = true;
+  bx.name = "";
+  bx.x = clamp(900 - bx.w / 2, 0, ROOM - bx.w);
+  bx.y = clamp(1150 + (world.boxes.length % 3) * 90, 0, ROOM - bx.h);
+  world.boxes.push(bx);
+  draw();
+  openNamer(bx);
+}
+
+let namingBox = null;
+function openNamer(bx) {
+  namingBox = bx;
+  const inp = el("objName"), r = cv.getBoundingClientRect();
+  inp.style.left = Math.round(clamp(r.left + (bx.x + bx.w / 2) / ROOM * r.width - 90, 8, innerWidth - 196)) + "px";
+  inp.style.top = Math.round(clamp(r.top + (bx.y + bx.h / 2) / ROOM * r.height - 16, 8, innerHeight - 44)) + "px";
+  inp.value = bx.unnamed ? "" : (bx.name || "");
+  inp.hidden = false;
+  inp.focus();
+  inp.select();
+}
+function closeNamer(apply) {
+  const inp = el("objName"), bx = namingBox;
+  const typed = inp.value.trim();
+  inp.hidden = true;
+  namingBox = null;
+  if (apply && bx) {
+    if (!typed) {                                   // nothing typed: take it away again
+      world.boxes = world.boxes.filter(o => o !== bx);
+      shadowsStale = true;
+      if (!bx.unnamed) say("taken out of the room", "say");
+    } else {
+      const kind = lightKind(typed);
+      if (kind) {                                   // it is a light, not a thing
+        world.boxes = world.boxes.filter(o => o !== bx);
+        world.lamps.push({ x: bx.x + bx.w / 2, y: bx.y + bx.h / 2, on: false, kind: kind });
+        shadowsStale = true;
+        say("a " + kind + " light put in the room, switched off - tap the bulb to light it", "say");
+      } else {
+        nameObject(bx, typed);
+        bx.unnamed = false;
+        say(bx.name + " put in the room - it bounces back " +
+            Math.round(bx.reflect * 100) + "% of the light that lands on it", "say");
+      }
+    }
+  }
   draw(); instruments();
 }
-el("clearLine").addEventListener("click", () => { fctx.clearRect(0, 0, FLOOR_N, FLOOR_N); refreshFloor(); draw(); });
-el("addBox").addEventListener("click", () => {
-  world.boxes.push({ x: 880, y: 320, w: 300, h: 150, z: 260, name: "box", fill: "#50596b" }); draw();
+el("objName").addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); closeNamer(true); }
+  if (e.key === "Escape") { e.preventDefault(); closeNamer(false); }
 });
+el("objName").addEventListener("blur", () => { if (namingBox) closeNamer(true); });
+el("addBox").addEventListener("click", addObject);
+
+// double click anything in the room to rename it, and change what it is made of
+cv.addEventListener("dblclick", ev => {
+  const p = canvasToMm(ev);
+  for (let i = world.boxes.length - 1; i >= 0; i--) {
+    const bx = world.boxes[i];
+    if (p.x > bx.x && p.x < bx.x + bx.w && p.y > bx.y && p.y < bx.y + bx.h) { openNamer(bx); return; }
+  }
+});
+
+(function fillObjectList() {
+  const dl = el("objList");
+  for (const k in CATALOGUE) {
+    const o = document.createElement("option");
+    o.value = k;
+    dl.appendChild(o);
+  }
+})();
 el("furnish").addEventListener("click", () => { furnish(); draw(); instruments(); });
 el("clearBoxes").addEventListener("click", () => { world.boxes.length = 0; draw(); instruments(); });
 el("trailBtn").addEventListener("click", e => {
@@ -2684,8 +2867,7 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
 
 /* start up: the editor, as wide as the window allows.
    One press of "Normal size" brings the instruments and the log back. */
-furnish();
-addArrows();
+addArrows();          // the room starts empty and dark; add what you need
 document.body.classList.add("wide");          // the blocks get the room by default
 el("wide").classList.add("on");
 draw();
@@ -2702,6 +2884,7 @@ draw();
     saveAll();
   }
   placeEveryone();
+  refreshViewButtons();
   renderDevices();
   draw(); instruments();
   startEditor();
