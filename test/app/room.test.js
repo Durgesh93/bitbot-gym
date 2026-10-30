@@ -104,7 +104,7 @@ describe("the room", () => {
     it("stops the wheels while it is being held, and lets go again", () => {
       const id = bus.send(ROOM, { cmd: "add" });
       bus.send(ROOM, { cmd: "place", id, x: 400, y: 1500 });
-      bus.send(ROOM, { cmd: "drive", id, left: 300, right: 300 });
+      bus.send(ROOM, { cmd: "drive", id, left: 100, right: 100 });
 
       bus.post(ROOM, { cmd: "hold", id });
       room.tick();

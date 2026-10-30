@@ -26,6 +26,8 @@ import { SCENES, DEFAULT_SCENE } from "../world/scenes/index.js";
 import * as bitbot from "../hardware/bitbot.js";
 import * as microbit from "../hardware/microbit.js";
 import { createBoard } from "../hardware/microbit.js";
+import { createChassis } from "../hardware/bitbot.js";
+import { createMachine } from "./machine.js";
 
 /* Every kind of chassis that can be put in the room: where its senses are,
    and how it turns what the world says into the number a block returns.
@@ -74,12 +76,25 @@ export function createRoom(options) {
     const starts = env.starts();
     const at = s.x != null ? s : (starts[kit.size % starts.length] || starts[0]);
     const id = s.id == null ? nextId++ : s.id;
+    const board = createBoard({ id: id, name: s.name || ("micro:bit " + id) });
+    const chassis = createChassis();
+    const machine = createMachine({
+      id: id, name: s.name || ("micro:bit " + id),
+      board: board, chassis: chassis,
+      now: () => clock.now,
+      reads: () => { const got = senses.get(id); return got ? got.reads : {}; },
+      temperature: () => env.mediumAt().airTemp,
+      radio: wireFor(id)
+    });
     kit.set(id, {
       device: s.device || "bitbot",
       /* this robot's own small squint, fixed for its whole life, so its two
          eyes never read exactly the same and a light-chaser can choose */
       trim: s.trim == null ? random.int(-6, 6) : s.trim,
-      board: createBoard({ id: id, name: s.name || ("micro:bit " + id) })
+      board: board,
+      chassis: chassis,
+      machine: machine,
+      pose: null                 // where it was last tick, for the wheel encoders
     });
     return env.addBody({
       id: id,
@@ -87,6 +102,34 @@ export function createRoom(options) {
       r: s.r == null ? bitbot.CHASSIS.radius : s.r,
       z: s.z == null ? 95 : s.z
     });
+  }
+
+  /* The radio, as one shared air. A message reaches every other board on
+     the same group and never the sender, and how strong it arrives is just
+     how far away the sender was - which is the whole of the lesson where
+     two children walk apart until the signal drops. */
+  let lastFrom = new Map();          // who each board heard from most recently
+  function wireFor(id) {
+    return {
+      send(kind, value, name) {
+        const me = kit.get(id);
+        if (!me) return;
+        for (const [other, k] of kit) {
+          if (other === id) continue;
+          if (k.board.state().group !== me.board.state().group) continue;
+          lastFrom.set(other, id);
+          k.machine.fire(kind === "number" ? "radioNumber"
+                       : kind === "string" ? "radioString" : "radioValue", value, name);
+        }
+      },
+      strength() {
+        const from = lastFrom.get(id);
+        if (from == null) return -128;
+        const a = env.bodyOf(id), b = env.bodyOf(from);
+        if (!a || !b) return -128;
+        return env.radioBetween(a, b).strength;
+      }
+    };
   }
 
   const find = id => env.bodyOf(id);
@@ -108,7 +151,10 @@ export function createRoom(options) {
       case "hold":  return env.holdBody(m.id, true);
       case "drop":  return env.holdBody(m.id, false);
       case "place": return env.placeBody(m.id, m.x, m.y, m.heading);
-      case "drive": return env.drive(m.id, m.left, m.right, bitbot.CHASSIS.axle);
+      /* The motors, as a percentage, exactly as the blocks set them. The
+         chassis turns that into millimetres per second on the next tick. */
+      case "drive": { const k = kit.get(m.id); if (!k) return false;
+                      k.chassis.wheels(m.left, m.right); return true; }
 
       case "lamp": {
         const L = env.scene.lamps[m.id];
@@ -126,8 +172,25 @@ export function createRoom(options) {
       /* A finger on a button, a hand shaking the board, a child picking a
          radio group. All posts: they come from a human, so they land
          between ticks like every other human thing. */
-      case "press":   { const k = kit.get(m.id); return k ? k.board.press(m.button, m.down) : false; }
-      case "gesture": { const k = kit.get(m.id); if (k) k.board.gesture(m.name); return !!k; }
+      case "press": {
+        const k = kit.get(m.id);
+        if (!k) return false;
+        k.board.press(m.button, m.down);
+        /* `on button A pressed` fires on the way DOWN, like the real one */
+        if (m.down) {
+          k.machine.fire(m.button);
+          if (m.button === "A" && k.board.pressed("B")) k.machine.fire("AB");
+          if (m.button === "B" && k.board.pressed("A")) k.machine.fire("AB");
+        }
+        return true;
+      }
+      case "gesture": {
+        const k = kit.get(m.id);
+        if (!k) return false;
+        k.board.gesture(m.name);
+        k.machine.fire(m.name);
+        return true;
+      }
       case "group":   { const k = kit.get(m.id); return k ? k.board.group(m.group) : false; }
       case "screen":  { const k = kit.get(m.id); if (!k) return false;
                         if (m.text != null) k.board.screen.leds(m.text);
@@ -137,13 +200,24 @@ export function createRoom(options) {
                         return true; }
       case "board":   { const k = kit.get(m.id); return k ? k.board : null; }
 
+      /* A program: loaded, started, stopped, put back. One robot at a
+         time, because each card has its own Play. */
+      case "load":  { const k = kit.get(m.id); if (!k) return false; k.machine.load(m.code); return true; }
+      case "run":   { const k = kit.get(m.id); if (!k) return false; k.machine.run(); return true; }
+      case "stop":  { const k = kit.get(m.id); if (!k) return false; k.machine.stop(); return true; }
+      case "reset": { const k = kit.get(m.id); if (!k) return false;
+                      k.machine.reset();
+                      if (k.start) env.placeBody(m.id, k.start.x, k.start.y, k.start.h);
+                      return true; }
+      case "plug":  { const k = kit.get(m.id); return k ? k.machine.plug(m.on) : false; }
+      case "stopAll": { for (const k of kit.values()) k.machine.stop(true); return true; }
+
+      /* A hand holding the buzzer on, as opposed to a program doing it.
+         Both end up as the same sound source. */
       case "beep": {
-        emitters = emitters.filter(e => e.owner !== m.id);
-        if (m.on !== false) {
-          const b = find(m.id);
-          if (b) emitters.push({ owner: m.id, x: b.x, y: b.y });
-        }
-        env.setEmitters(emitters);
+        const k = kit.get(m.id);
+        if (!k) return false;
+        k.buzzing = m.on !== false;
         return true;
       }
 
@@ -169,11 +243,45 @@ export function createRoom(options) {
     for (const u of drained.undelivered) problems.push({ what: "nobody took it", ...u });
     while (problems.length > 50) problems.shift();
 
+    /* 2. Every robot's motors, as they stand, become wheel speeds. The
+       chassis works out the millimetres per second - a flat battery, the
+       dead band, the fact that no two motors are twins - and matter.js is
+       told nothing but the two numbers. */
+    for (const [id, k] of kit) {
+      const w = k.chassis.commandedSpeeds();
+      env.drive(id, w.vl, w.vr, bitbot.CHASSIS.axle);
+      const was = env.bodyOf(id);
+      k.pose = was ? { x: was.x, y: was.y, h: was.h } : null;
+      if (!k.start && was) k.start = { x: was.x, y: was.y, h: was.h };
+    }
+
     /* 4. Everything moves, once, and the fields are marked stale once. A
        held body is static in the engine, so the hand owns it completely. */
     env.step(DT);
 
-    for (const e of emitters) { const b = find(e.owner); if (b) { e.x = b.x; e.y = b.y; } }
+    /* The encoders count what actually happened, not what was asked for.
+       That gap IS the lesson: a robot stuck against a table leg has motors
+       running and wheels that are not turning, and "go 20 cm" never
+       finishes. Two wheels is all the robot knows about its own heading. */
+    for (const [id, k] of kit) {
+      const now = env.bodyOf(id);
+      if (!now || !k.pose) continue;
+      const dx = now.x - k.pose.x, dy = now.y - k.pose.y;
+      let dh = now.h - k.pose.h;
+      while (dh > Math.PI) dh -= 2 * Math.PI;
+      while (dh < -Math.PI) dh += 2 * Math.PI;
+      const along = dx * Math.cos(k.pose.h) + dy * Math.sin(k.pose.h);
+      const half = dh * bitbot.CHASSIS.axle / 2;
+      k.chassis.rolled(along + half, along - half);
+    }
+
+    /* A beeping board is a sound source its neighbours can hear. */
+    emitters = [];
+    for (const [id, k] of kit) {
+      if (!k.buzzing && !k.machine.isBeeping()) continue;
+      const b = env.bodyOf(id);
+      if (b) emitters.push({ owner: id, x: b.x, y: b.y });
+    }
     env.setEmitters(emitters);
 
     /* 5. Now, and only now, the sensors. The world has settled, so every
@@ -196,6 +304,12 @@ export function createRoom(options) {
     }
 
     advance(DT);
+
+    /* 6. The clock has moved, so every program that was waiting for it can
+       carry on. They run as microtasks, which means after this tick and
+       before the next - never half way through one. */
+    for (const k of kit.values()) k.machine.release();
+
     return drained;
   }
 
@@ -212,8 +326,12 @@ export function createRoom(options) {
     const s = env.snapshot();
     s.bodies = s.bodies.map(b => {
       const got = senses.get(b.id);
+      const k = kit.get(b.id);
+      const prog = k ? { state: k.machine.state(), stopwatch: k.machine.stopwatch(),
+                         plugged: k.machine.plugged(), armed: k.machine.armed().length,
+                         pixels: k.chassis.state().pixels, model: k.chassis.model() } : null;
       return got ? { ...b, senses: got.senses, reads: got.reads,
-                     screen: got.screen, board: got.board } : b;
+                     screen: got.screen, board: got.board, program: prog } : b;
     });
     return { t: clock.now, scene: sceneName, seed: seed, ...s };
   }
@@ -236,6 +354,8 @@ export function createRoom(options) {
     env: () => env,
     bodies: bodies,
     kit: (id) => kit.get(id) || null,
+    machine: (id) => { const k = kit.get(id); return k ? k.machine : null; },
+    machines: () => [...kit.values()].map(k => k.machine),
     problems: () => problems.slice(),
     close: stop
   };
