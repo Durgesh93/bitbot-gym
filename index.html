@@ -909,7 +909,11 @@ function rayDistance(ox, oy, ang) {
     const x = ox + c * d, y = oy + s * d;
     if (x < 0 || y < 0 || x > ROOM || y > ROOM) {
       const nx = x < 0 ? 1 : x > ROOM ? -1 : 0, ny = y < 0 ? 1 : y > ROOM ? -1 : 0;
-      return Math.abs(c * nx + s * ny) < 0.5 ? Infinity : d;      // too slanted, the echo goes elsewhere
+      /* A wall is painted plaster, not a mirror: it scatters the ping about, so
+         an echo comes back even from a fair slant. Only a really glancing hit,
+         past about 75 degrees, loses it altogether - which is also how the
+         furniture behaves, since a box echoes whatever angle it is hit at. */
+      return Math.abs(c * nx + s * ny) < 0.25 ? Infinity : d;
     }
     for (const bx of world.boxes) if (objContains(bx, { x: x, y: y })) return d;
   }
