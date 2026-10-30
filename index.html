@@ -1522,7 +1522,7 @@ function makeApi(m) {
     calibrateLine: () => proOnly(m, b, "calibrateLine"),
 
     /* ---------------- the other sensors ---------------- */
-    readLight: (sensor) => readLightSensor(sensor),
+    readLight: (sensor) => readLightSensor(b, sensor),
     sonar: (unit) => {
       const cm = readSonar(b);
       if (cm === 0) once(m, "sonar0", "note: nothing within 2 m, so sonar gives 0 - watch out for \"if sonar < 15\"");
