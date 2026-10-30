@@ -471,12 +471,13 @@ function physics(dt) {
     if (b.y > ROOM - Rr) { b.y = ROOM - Rr; bumped = true; }
 
     for (const bx of world.boxes) {
-      const cx = Math.max(bx.x, Math.min(b.x, bx.x + bx.w));
-      const cy = Math.max(bx.y, Math.min(b.y, bx.y + bx.h));
-      let dx = b.x - cx, dy = b.y - cy, d = Math.hypot(dx, dy);
+      const l = toLocal(bx, b);
+      const near = { x: clamp(l.x, -bx.w / 2, bx.w / 2), y: clamp(l.y, -bx.h / 2, bx.h / 2) };
+      let dx = l.x - near.x, dy = l.y - near.y, d = Math.hypot(dx, dy);
       if (d < Rr) {
         if (d < 0.001) { dx = 0; dy = -1; d = 1; }
-        b.x = cx + dx / d * Rr; b.y = cy + dy / d * Rr; bumped = true;
+        const out = toWorld(bx, { x: near.x + dx / d * Rr, y: near.y + dy / d * Rr });
+        b.x = out.x; b.y = out.y; bumped = true;
       }
     }
     // and into each other, which is half the fun of having more than one
@@ -582,9 +583,28 @@ function furnish() {
    distance, a surface facing away from it catches less (Lambert's cosine
    law), and anything solid in between casts a shadow.
    ---------------------------------------------------------------------- */
+/* Things can be turned on the spot, so nothing may assume a box is square
+   to the room any more: shadows, bumping into it and the sonar all ask for
+   its real corners. */
+const objC = bx => Math.cos(bx.rot || 0);
+const objS = bx => Math.sin(bx.rot || 0);
+function objCentre(bx) { return { x: bx.x + bx.w / 2, y: bx.y + bx.h / 2 }; }
+function toLocal(bx, p) {
+  const o = objCentre(bx), c = objC(bx), s = objS(bx);
+  const dx = p.x - o.x, dy = p.y - o.y;
+  return { x: dx * c + dy * s, y: -dx * s + dy * c };
+}
+function toWorld(bx, p) {
+  const o = objCentre(bx), c = objC(bx), s = objS(bx);
+  return { x: o.x + p.x * c - p.y * s, y: o.y + p.x * s + p.y * c };
+}
+function objContains(bx, p) {
+  const l = toLocal(bx, p);
+  return Math.abs(l.x) <= bx.w / 2 && Math.abs(l.y) <= bx.h / 2;
+}
 function cornersOf(bx) {
-  return [{ x: bx.x, y: bx.y }, { x: bx.x + bx.w, y: bx.y },
-          { x: bx.x + bx.w, y: bx.y + bx.h }, { x: bx.x, y: bx.y + bx.h }];
+  const hw = bx.w / 2, hh = bx.h / 2;
+  return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(c => toWorld(bx, { x: c[0], y: c[1] }));
 }
 /* How long a shadow is, is just similar triangles: a lamp at height H, an
    object of height z standing d away, throws its shadow d*z/(H-z) further on.
@@ -645,7 +665,7 @@ function inShadow(x, y, which, self) {
   return false;
 }
 const lampH = L => (L.kind === "ceiling" ? 2400 : 110);
-const lampI = L => (L.kind === "ceiling" ? 3.2 : cfg.torch / 1000);
+const lampI = L => (L.kind === "ceiling" ? 13 : cfg.torch / 1000);
 const anyCeiling = () => world.lamps.some(L => L.on && L.kind === "ceiling");
 
 function lampsOn() {
@@ -675,7 +695,7 @@ function buildBounce() {
 
 function illuminance(x, y, facing, self, withBounce) {
   if (shadowsStale) { buildShadows(); shadowsStale = false; }
-  let e = anyCeiling() ? 0.05 : 0.004;          // light bouncing round the room          // light bouncing round the room
+  let e = anyCeiling() ? 0.20 : 0.004;          // light bouncing round the room          // light bouncing round the room
   for (const L of lampsOn()) {
     const dx = L.x - x, dy = L.y - y;
     const d2 = (dx * dx + dy * dy) / 1e6;            // m^2
@@ -733,6 +753,8 @@ function readLineSensor(b, which) {
    15 uT, is any use for finding north - which is why a compass is so easily
    upset. North is up the screen; declination tilts true north a little east. */
 const FIELD = { total: 50.5, inclination: 72, declination: 3 };
+// which way magnetic north lies on the screen, in canvas angles
+const MAG_NORTH = -Math.PI / 2 + FIELD.declination * Math.PI / 180;
 
 function compassHeadingDeg(m) {
   const h = (placeOf(m).h * 180 / Math.PI + 90 - FIELD.declination) % 360;
@@ -760,9 +782,7 @@ function rayDistance(ox, oy, ang) {
       const nx = x < 0 ? 1 : x > ROOM ? -1 : 0, ny = y < 0 ? 1 : y > ROOM ? -1 : 0;
       return Math.abs(c * nx + s * ny) < 0.5 ? Infinity : d;      // too slanted, the echo goes elsewhere
     }
-    for (const bx of world.boxes) {
-      if (x > bx.x && x < bx.x + bx.w && y > bx.y && y < bx.y + bx.h) return d;
-    }
+    for (const bx of world.boxes) if (objContains(bx, { x: x, y: y })) return d;
   }
   return Infinity;
 }
@@ -1572,7 +1592,7 @@ function drawOverlays() {
   }
 
   if (show.magnetic) {
-    const step = cv.width / 10, ang = -Math.PI / 2 - FIELD.declination * Math.PI / 180;
+    const step = cv.width / 10, ang = MAG_NORTH;
     ctx.strokeStyle = "rgba(91,192,235,0.26)"; ctx.lineWidth = 1.3;
     for (let y = step / 2; y < cv.height; y += step) {
       for (let x = step / 2; x < cv.width; x += step) {
@@ -1647,7 +1667,7 @@ function draw() {
   ctx.clearRect(0, 0, cv.width, cv.height);
 
   // the floor, with only the light that bounces around the room
-  ctx.fillStyle = anyCeiling() ? "#20242e" : "#111319";
+  ctx.fillStyle = anyCeiling() ? "#333b4c" : "#111319";
   ctx.fillRect(0, 0, cv.width, cv.height);
 
   // a ceiling light spreads wide; one on the floor makes a tight pool
@@ -1655,11 +1675,11 @@ function draw() {
     if (!L.on) continue;
     const ceiling = L.kind === "ceiling";
     const g = ctx.createRadialGradient(L.x * S, L.y * S, ceiling ? 10 : 4,
-                                       L.x * S, L.y * S, (ceiling ? 1500 : 760) * S);
+                                       L.x * S, L.y * S, (ceiling ? 2600 : 760) * S);
     if (ceiling) {
-      g.addColorStop(0, "rgba(255,243,214,0.40)");
-      g.addColorStop(0.5, "rgba(255,238,200,0.17)");
-      g.addColorStop(1, "rgba(255,235,190,0.02)");
+      g.addColorStop(0, "rgba(255,246,222,0.66)");
+      g.addColorStop(0.45, "rgba(255,242,210,0.48)");
+      g.addColorStop(1, "rgba(255,238,198,0.26)");
     } else {
       g.addColorStop(0, "rgba(255,230,150,0.62)");
       g.addColorStop(0.4, "rgba(255,210,120,0.20)");
@@ -1683,35 +1703,58 @@ function draw() {
   };
   world.lamps.forEach((L, i) => paint(SHADOWS.lamps[i] || [], L.kind === "ceiling" ? 0.26 : 0.42));
 
-  // the furniture
+  // the furniture, each turned however you left it
   for (const b of world.boxes) {
+    const o = objCentre(b), w = b.w * S, h = b.h * S;
+    ctx.save();
+    ctx.translate(o.x * S, o.y * S);
+    ctx.rotate(b.rot || 0);
+
     ctx.save();
     ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 9 * S; ctx.shadowOffsetY = 2 * S;
     ctx.fillStyle = b.fill || "#3d4657";
-    if (b.round) {
-      ctx.beginPath();
-      ctx.ellipse((b.x + b.w / 2) * S, (b.y + b.h / 2) * S, b.w / 2 * S, b.h / 2 * S, 0, 0, 7);
-      ctx.fill();
-    } else {
-      roundRect(b.x * S, b.y * S, b.w * S, b.h * S, 6 * S); ctx.fill();
-    }
+    if (b.round) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, 7); ctx.fill(); }
+    else { roundRect(-w / 2, -h / 2, w, h, 6 * S); ctx.fill(); }
     ctx.restore();
+
+    drawThingDetail(b);
+
     ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.lineWidth = 1.5;
-    if (!b.round) { roundRect(b.x * S, b.y * S, b.w * S, b.h * S, 6 * S); ctx.stroke(); }
+    if (!b.round) { roundRect(-w / 2, -h / 2, w, h, 6 * S); ctx.stroke(); }
     if (b.unnamed) {
       ctx.setLineDash([6, 5]);
       ctx.strokeStyle = "rgba(91,192,235,0.95)"; ctx.lineWidth = 2;
-      roundRect(b.x * S, b.y * S, b.w * S, b.h * S, 6 * S); ctx.stroke();
+      roundRect(-w / 2, -h / 2, w, h, 6 * S); ctx.stroke();
       ctx.setLineDash([]);
     }
+    ctx.restore();
+
     const label = b.unnamed ? "name it" : b.name;
-    if (label && b.w * S > 56) {
-      ctx.fillStyle = b.unnamed ? "rgba(91,192,235,0.95)" : "rgba(255,255,255,0.55)";
+    if (label && w > 56) {
+      ctx.fillStyle = b.unnamed ? "rgba(91,192,235,0.95)" : "rgba(255,255,255,0.6)";
       ctx.font = (b.unnamed ? "bold " : "") + Math.round(11 * (cv.width / 1100)) + "px system-ui, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(label, (b.x + b.w / 2) * S, (b.y + b.h / 2) * S + 4);
+      ctx.fillText(label, o.x * S, o.y * S + 4);
       ctx.textAlign = "left";
     }
+
+    // one handle turns it, the other makes another one
+    const hub = toWorld(b, { x: b.w / 2 + 55, y: 0 });
+    ctx.beginPath(); ctx.arc(hub.x * S, hub.y * S, 9 * S, 0, 7);
+    ctx.fillStyle = "rgba(91,192,235,0.22)"; ctx.fill();
+    ctx.strokeStyle = "rgba(91,192,235,0.75)"; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(hub.x * S, hub.y * S, 4.5 * S, 0.6, 5.1);
+    ctx.strokeStyle = "rgba(91,192,235,0.95)"; ctx.lineWidth = 1.6; ctx.stroke();
+
+    const cop = toWorld(b, { x: -(b.w / 2 + 55), y: 0 });
+    ctx.beginPath(); ctx.arc(cop.x * S, cop.y * S, 9 * S, 0, 7);
+    ctx.fillStyle = "rgba(70,195,123,0.22)"; ctx.fill();
+    ctx.strokeStyle = "rgba(70,195,123,0.75)"; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cop.x * S - 4.5 * S, cop.y * S); ctx.lineTo(cop.x * S + 4.5 * S, cop.y * S);
+    ctx.moveTo(cop.x * S, cop.y * S - 4.5 * S); ctx.lineTo(cop.x * S, cop.y * S + 4.5 * S);
+    ctx.strokeStyle = "rgba(70,195,123,0.95)"; ctx.lineWidth = 1.8; ctx.stroke();
   }
 
   // where each robot has been, in the colour of the board driving it
@@ -1738,7 +1781,7 @@ function draw() {
   const nx = cv.width - 46 * (cv.width / 1100), ny = 46 * (cv.width / 1100), nr = 20 * (cv.width / 1100);
   ctx.save();
   ctx.translate(nx, ny);
-  ctx.rotate(-FIELD.declination * Math.PI / 180);
+  ctx.rotate(MAG_NORTH + Math.PI / 2);          // the same north the arrows use
   ctx.beginPath(); ctx.moveTo(0, -nr); ctx.lineTo(nr * 0.42, nr * 0.5); ctx.lineTo(0, nr * 0.2);
   ctx.lineTo(-nr * 0.42, nr * 0.5); ctx.closePath();
   ctx.fillStyle = "rgba(232,87,90,0.85)"; ctx.fill();
@@ -1746,7 +1789,7 @@ function draw() {
   ctx.fillStyle = "rgba(255,255,255,0.65)";
   ctx.font = "bold " + Math.round(12 * (cv.width / 1100)) + "px system-ui, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("N", nx, ny - nr - 3);
+  ctx.fillText("N", nx, ny - nr - 3);          // magnetic north, which is what a compass finds
   ctx.textAlign = "left";
 
   // the walls
@@ -1852,6 +1895,136 @@ function drawBot(b) {
 }
 
 /* a little bulb: tap it to switch it, drag it to move it */
+/* A sofa should look like a sofa from above. Nothing fancy: enough shape
+   that a nine year old can tell the furniture apart at a glance. */
+function shade(hex, amount) {
+  const n = parseInt(String(hex).slice(1), 16);
+  const f = c => clamp(Math.round(c + amount * 255), 0, 255);
+  return "rgb(" + f((n >> 16) & 255) + "," + f((n >> 8) & 255) + "," + f(n & 255) + ")";
+}
+
+function drawThingDetail(b) {
+  const w = b.w * S, h = b.h * S, x = -w / 2, y = -h / 2;
+  const name = (b.name || "").toLowerCase();
+  const fill = b.fill || "#50596b";
+  const dark = shade(fill, -0.14), light = shade(fill, 0.16);
+  const tall = h >= w;                                    // which way it is facing
+  ctx.save();
+
+  if (name.includes("sofa")) {
+    ctx.fillStyle = dark;                                 // the back
+    if (tall) roundRect(x, y, w * 0.3, h, 6 * S); else roundRect(x, y, w, h * 0.3, 6 * S);
+    ctx.fill();
+    ctx.fillStyle = light;                                // two arms
+    if (tall) { ctx.fillRect(x + w * 0.3, y, w * 0.7, h * 0.16); ctx.fillRect(x + w * 0.3, y + h * 0.84, w * 0.7, h * 0.16); }
+    else { ctx.fillRect(x, y + h * 0.3, w * 0.16, h * 0.7); ctx.fillRect(x + w * 0.84, y + h * 0.3, w * 0.16, h * 0.7); }
+    ctx.strokeStyle = dark; ctx.lineWidth = 1.2;          // the seat cushions
+    ctx.beginPath();
+    if (tall) { ctx.moveTo(x + w * 0.3, y + h / 2); ctx.lineTo(x + w, y + h / 2); }
+    else { ctx.moveTo(x + w / 2, y + h * 0.3); ctx.lineTo(x + w / 2, y + h); }
+    ctx.stroke();
+
+  } else if (name.includes("table") || name.includes("desk")) {
+    ctx.fillStyle = dark;                                 // four legs under the top
+    const r = Math.max(2, 5 * S), i = 7 * S;
+    for (const [lx, ly] of [[x + i, y + i], [x + w - i, y + i], [x + i, y + h - i], [x + w - i, y + h - i]]) {
+      ctx.beginPath(); ctx.arc(lx, ly, r, 0, 7); ctx.fill();
+    }
+    ctx.strokeStyle = light; ctx.lineWidth = 1.4;
+    roundRect(x + w * 0.12, y + h * 0.16, w * 0.76, h * 0.68, 4 * S); ctx.stroke();
+
+  } else if (name.includes("chair") || name.includes("stool")) {
+    ctx.fillStyle = dark;
+    if (tall) ctx.fillRect(x, y, w, h * 0.26); else ctx.fillRect(x, y, w * 0.26, h);
+    ctx.strokeStyle = light; ctx.lineWidth = 1.2;
+    roundRect(x + w * 0.18, y + h * 0.3, w * 0.64, h * 0.6, 4 * S); ctx.stroke();
+
+  } else if (name.includes("whiteboard") || name.includes("screen") || name.includes("mirror")) {
+    ctx.strokeStyle = shade(fill, -0.35); ctx.lineWidth = 3;   // a frame
+    ctx.strokeRect(x + 2, y + 2, w - 4, h - 4);
+    ctx.fillStyle = "rgba(255,255,255,0.5)";                   // a gleam
+    ctx.fillRect(x + w * 0.08, y + h * 0.3, w * 0.3, h * 0.18);
+
+  } else if (name.includes("bookcase") || name.includes("shelf") || name.includes("cupboard")) {
+    ctx.strokeStyle = dark; ctx.lineWidth = 1.5;
+    for (let k = 1; k < 4; k++) {
+      ctx.beginPath();
+      if (tall) { ctx.moveTo(x, y + h * k / 4); ctx.lineTo(x + w, y + h * k / 4); }
+      else { ctx.moveTo(x + w * k / 4, y); ctx.lineTo(x + w * k / 4, y + h); }
+      ctx.stroke();
+    }
+
+  } else if (name.includes("plant")) {
+    ctx.fillStyle = shade(fill, 0.2);
+    for (const [ox, oy, rr] of [[0.3, 0.32, 0.22], [0.68, 0.36, 0.2], [0.5, 0.66, 0.24]]) {
+      ctx.beginPath(); ctx.arc(x + w * ox, y + h * oy, Math.min(w, h) * rr, 0, 7); ctx.fill();
+    }
+
+  } else if (name.includes("bin")) {
+    ctx.strokeStyle = light; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) * 0.34, 0, 7); ctx.stroke();
+
+  } else if (name.includes("backpack") || name.includes("bag")) {
+    ctx.fillStyle = light;                                 // the flap
+    roundRect(x + w * 0.12, y + h * 0.08, w * 0.76, h * 0.42, 5 * S); ctx.fill();
+    ctx.strokeStyle = dark; ctx.lineWidth = 1.6;           // two straps
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.3, y + h * 0.55); ctx.lineTo(x + w * 0.3, y + h * 0.95);
+    ctx.moveTo(x + w * 0.7, y + h * 0.55); ctx.lineTo(x + w * 0.7, y + h * 0.95);
+    ctx.stroke();
+
+  } else if (name.includes("notebook") || name.includes("book") || name.includes("paper")) {
+    ctx.strokeStyle = shade(fill, -0.3); ctx.lineWidth = 1.6;
+    ctx.beginPath();                                       // the spine
+    if (tall) { ctx.moveTo(x + w * 0.22, y); ctx.lineTo(x + w * 0.22, y + h); }
+    else { ctx.moveTo(x, y + h * 0.22); ctx.lineTo(x + w, y + h * 0.22); }
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(0,0,0,0.18)"; ctx.lineWidth = 1;
+    for (let k = 1; k <= 3; k++) {
+      ctx.beginPath();
+      if (tall) { ctx.moveTo(x + w * 0.35, y + h * k / 4); ctx.lineTo(x + w * 0.9, y + h * k / 4); }
+      else { ctx.moveTo(x + w * k / 4, y + h * 0.35); ctx.lineTo(x + w * k / 4, y + h * 0.9); }
+      ctx.stroke();
+    }
+
+  } else if (name.includes("pen") && !name.includes("pencil box")) {
+    ctx.fillStyle = "#d8dde6";                             // a nib at one end
+    if (tall) ctx.fillRect(x, y, w, h * 0.18); else ctx.fillRect(x, y, w * 0.18, h);
+
+  } else if (name.includes("pencil")) {
+    ctx.strokeStyle = light; ctx.lineWidth = 1.6;          // a lid
+    ctx.beginPath();
+    if (tall) { ctx.moveTo(x, y + h * 0.35); ctx.lineTo(x + w, y + h * 0.35); }
+    else { ctx.moveTo(x + w * 0.35, y); ctx.lineTo(x + w * 0.35, y + h); }
+    ctx.stroke();
+
+  } else if (name.includes("projector")) {
+    ctx.fillStyle = shade(fill, -0.3);                     // the lens
+    ctx.beginPath(); ctx.arc(x + w * 0.74, y + h / 2, Math.min(w, h) * 0.22, 0, 7); ctx.fill();
+    ctx.fillStyle = light;
+    ctx.fillRect(x + w * 0.1, y + h * 0.2, w * 0.3, h * 0.2);
+
+  } else if (name.includes("toy box") || name.includes("chest")) {
+    ctx.strokeStyle = light; ctx.lineWidth = 1.8;          // a lid and a latch
+    ctx.beginPath();
+    if (tall) { ctx.moveTo(x, y + h / 2); ctx.lineTo(x + w, y + h / 2); }
+    else { ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w / 2, y + h); }
+    ctx.stroke();
+    ctx.fillStyle = "#d8b24a";
+    ctx.fillRect(x + w / 2 - 4 * S, y + h / 2 - 4 * S, 8 * S, 8 * S);
+
+  } else if (name.includes("wall")) {
+    ctx.strokeStyle = shade(fill, -0.2); ctx.lineWidth = 1;   // brickwork
+    for (let k = 1; k < 6; k++) {
+      ctx.beginPath();
+      if (tall) { ctx.moveTo(x, y + h * k / 6); ctx.lineTo(x + w, y + h * k / 6); }
+      else { ctx.moveTo(x + w * k / 6, y); ctx.lineTo(x + w * k / 6, y + h); }
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 function drawBulb(L) {
   const x = L.x * S, y = L.y * S, r = 15 * S;
   if (L.on) {
@@ -1969,9 +2142,20 @@ cv.addEventListener("pointerdown", ev => {
   }
   for (let i = world.boxes.length - 1; i >= 0; i--) {
     const bx = world.boxes[i];
-    if (p.x > bx.x && p.x < bx.x + bx.w && p.y > bx.y && p.y < bx.y + bx.h) {
-      dragging = { kind: "box", box: bx, dx: p.x - bx.x, dy: p.y - bx.y }; return;
+    const hub = toWorld(bx, { x: bx.w / 2 + 55, y: 0 });          // the turning handle
+    if (Math.hypot(p.x - hub.x, p.y - hub.y) < 60) { dragging = { kind: "turn", box: bx }; return; }
+    const cop = toWorld(bx, { x: -(bx.w / 2 + 55), y: 0 });       // and the copying one
+    if (Math.hypot(p.x - cop.x, p.y - cop.y) < 60) {
+      const twin = Object.assign({}, bx);
+      twin.x = clamp(bx.x + 110, 0, ROOM - bx.w);
+      twin.y = clamp(bx.y + 110, 0, ROOM - bx.h);
+      world.boxes.push(twin);
+      shadowsStale = true;
+      say("another " + (twin.name || "one") + " - drag it where you want it", "say");
+      dragging = { kind: "box", box: twin, dx: p.x - twin.x, dy: p.y - twin.y };
+      return;
     }
+    if (objContains(bx, p)) { dragging = { kind: "box", box: bx, dx: p.x - bx.x, dy: p.y - bx.y }; return; }
   }
 });
 cv.addEventListener("pointermove", ev => {
@@ -1985,7 +2169,15 @@ cv.addEventListener("pointermove", ev => {
   else if (dragging.kind === "bot") { dragging.bot.x = p.x; dragging.bot.y = p.y; dragging.bot.trail.length = 0; }
   else if (dragging.kind === "spin") { dragging.bot.h = Math.atan2(p.y - dragging.bot.y, p.x - dragging.bot.x); }
   else if (dragging.kind === "board") { dragging.m.x = p.x; dragging.m.y = p.y; }
-  else if (dragging.kind === "box") { dragging.box.x = p.x - dragging.dx; dragging.box.y = p.y - dragging.dy; }
+  else if (dragging.kind === "box") {
+    dragging.box.x = p.x - dragging.dx; dragging.box.y = p.y - dragging.dy;
+    shadowsStale = true;
+  }
+  else if (dragging.kind === "turn") {
+    const o = objCentre(dragging.box);
+    dragging.box.rot = Math.atan2(p.y - o.y, p.x - o.x);
+    shadowsStale = true;
+  }
   if (!running) { draw(); instruments(); }
 });
 cv.addEventListener("pointerup", () => {
@@ -2096,8 +2288,7 @@ el("addBox").addEventListener("click", addObject);
 cv.addEventListener("dblclick", ev => {
   const p = canvasToMm(ev);
   for (let i = world.boxes.length - 1; i >= 0; i--) {
-    const bx = world.boxes[i];
-    if (p.x > bx.x && p.x < bx.x + bx.w && p.y > bx.y && p.y < bx.y + bx.h) { openNamer(bx); return; }
+    if (objContains(world.boxes[i], p)) { openNamer(world.boxes[i]); return; }
   }
 });
 
@@ -2585,8 +2776,9 @@ const STAGE_CSS = `
                   grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); }
   #stage .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
   #stage .card.idle { opacity: .5; }
-  /* a card simply brightens while its program is running */
-  #stage .card.live { background: #273142; border-color: #52627d; }
+  /* a card brightens, and takes a green edge, while its program runs */
+  #stage .card.live { background: #313d52; border-color: var(--go); box-shadow: inset 3px 0 0 var(--go); }
+  #stage .card.live .top b { color: #d6ffe6; }
   #stage .top { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
   #stage .top b { font-size: 15px; }
   #stage .dot { width: 10px; height: 10px; border-radius: 50%; display: block; }
