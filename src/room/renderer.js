@@ -20,7 +20,6 @@
 import { clamp } from "../core/util.js";
 
 const MAG_NORTH = -Math.PI / 2 + 3 * Math.PI / 180;
-const LMAP_N = 150;            // light samples across the room, for the look
 const FLOOR = 0.1;             // how dark the PICTURE may get; see paintLight
 
 let ctx = null;                // the canvas being drawn on, and mm -> px
@@ -253,38 +252,119 @@ function drawBody(b) {
 
 export function createRoomRenderer(canvas) {
   const target = canvas.getContext("2d");
-  const lmap = document.createElement("canvas");
-  lmap.width = lmap.height = LMAP_N;
-  const lctx = lmap.getContext("2d");
-  let painted = "";
+  const lit = document.createElement("canvas");         // all the light, added up
+  const one = document.createElement("canvas");         // one source at a time
+  const stage = document.createElement("canvas");       // the furniture, on its own
+  const lctx = lit.getContext("2d");
+  const octx = one.getContext("2d");
+  const sctx = stage.getContext("2d");
 
-  /* Two things decide how a square of floor looks: how bright the room is at
-     all, and how it compares with the brightest square in it. That second
-     part is what makes a shadow show up under a lamp bright enough to wash
-     everything out - the eye judges a shadow by what is beside it. */
-  function paintLight(map, n, mark) {
-    if (mark === painted) return;
-    painted = mark;
-    const img = lctx.createImageData(n, n);
-    let top = 0;
-    for (let k = 0; k < map.length; k++) if (map[k] > top) top = map[k];
-    const lit = top / (top + 0.9);
-    for (let k = 0; k < map.length; k++) {
-      /* FLOOR is a drawing choice, not physics. With every lamp off the room
-         really is pitch black, and the sensors say so - but a child staring
-         at a black square cannot tell where the furniture went, so the
-         picture keeps a little moonlight in it. Nothing reads this number
-         except the canvas. */
-      const v = Math.max(FLOOR, Math.pow(map[k] / (top || 1), 0.8) * lit);
-      const q = k * 4;
-      img.data[q] = 255 * v; img.data[q + 1] = 248 * v; img.data[q + 2] = 232 * v;
-      img.data[q + 3] = 255;
-    }
-    lctx.putImageData(img, 0, 0);
+  /* How much of the light a standing thing takes. Less than the floor does,
+     and that is honest: a table top is 700 mm nearer the ceiling lamp than
+     the lino is, so it really does catch more. It also keeps the furniture
+     recognisable in a room where somebody has turned every lamp off. */
+  const STANDING = 0.6;
+
+  /* How bright a patch of floor LOOKS.
+
+     Two things decide it: how bright the room is at all, and how this patch
+     compares with the brightest patch in it. That second part is what makes
+     a shadow show up under a lamp bright enough to wash everything out - the
+     eye judges a shadow by what is beside it. It is the gym's own curve, and
+     without it every lit room draws as one flat grey rectangle. */
+  const look = (e, top) => Math.pow(clamp(e / (top || 1), 0, 1), 0.8) * (top / (top + 0.9));
+
+  /* The brightest the room gets: right under whichever source is strongest.
+     Everything else is drawn relative to it. */
+  function peak(snap) {
+    let top = snap.ambient;
+    for (const r of snap.light) if (r.profile.e[0] > top) top = r.profile.e[0];
+    return top;
   }
 
-  /* snap is the room's snapshot; light is {map, n, mark} from room.lightMap(). */
-  function draw(snap, light) {
+  /* A lamp's glow, straight off the curve the light field sampled for us -
+     so it falls away at exactly the rate a light sensor would measure. */
+  function glow(ctx, src, S, top, ambient, profile) {
+    const base = look(ambient, top), n = profile.e.length - 1;
+    const g = ctx.createRadialGradient(src.x * S, src.y * S, 0, src.x * S, src.y * S, profile.reach * S);
+    for (let k = 0; k <= n; k++) {
+      /* what this source ADDS over the ambient, so several of them can be
+         laid on top of one another without the room turning white */
+      const v = Math.round(255 * clamp(look(profile.e[k], top) - base, 0, 1));
+      g.addColorStop(k / n, "rgba(" + v + "," + Math.round(v * 0.97) + "," + Math.round(v * 0.91) + ",1)");
+    }
+    return g;
+  }
+
+  /* One lamp, drawn from the very same polygons the sensors were given, so
+     the picture and the numbers cannot drift apart:
+       - the glow, by the same inverse-square law as light.at
+       - clipped to what the lamp can SEE (the visibility polygon, which is
+         how a tall thing's shadow runs on until it meets a wall)
+       - minus the quads of the shorter things, whose shadows end. */
+  function paintSource(region, S, W, snap, top) {
+    const src = region.source;
+    octx.setTransform(1, 0, 0, 1, 0, 0);
+    octx.clearRect(0, 0, W, W);
+
+    if (src.kind === "sun") {
+      const base = look(snap.ambient, top);
+      const v = Math.round(255 * clamp(look(region.profile.e[0], top) - base, 0, 1));
+      octx.fillStyle = "rgba(" + v + "," + Math.round(v * 0.97) + "," + Math.round(v * 0.88) + ",1)";
+      octx.fillRect(0, 0, W, W);
+    } else {
+      octx.fillStyle = glow(octx, src, S, top, snap.ambient, region.profile);
+      octx.fillRect(0, 0, W, W);
+      if (region.visible && region.visible.length > 2) {
+        octx.save();                                    // keep only what the lamp can see
+        octx.globalCompositeOperation = "destination-in";
+        octx.beginPath();
+        octx.moveTo(region.visible[0][0] * S, region.visible[0][1] * S);
+        for (const p of region.visible.slice(1)) octx.lineTo(p[0] * S, p[1] * S);
+        octx.closePath();
+        octx.fillStyle = "#fff";
+        octx.fill();
+        octx.restore();
+      }
+    }
+
+    octx.save();                                        // and punch out the ending shadows
+    octx.globalCompositeOperation = "destination-out";
+    octx.fillStyle = "#000";
+    for (const poly of region.quads) {
+      if (!poly || poly.length < 3) continue;
+      octx.beginPath();
+      octx.moveTo(poly[0].x * S, poly[0].y * S);
+      for (const p of poly.slice(1)) octx.lineTo(p.x * S, p.y * S);
+      octx.closePath();
+      octx.fill();
+    }
+    octx.restore();
+
+    lctx.globalCompositeOperation = "lighter";
+    lctx.drawImage(one, 0, 0);
+  }
+
+  function paintLight(snap, S, W) {
+    if (lit.width !== W) { lit.width = lit.height = W; one.width = one.height = W; }
+    lctx.setTransform(1, 0, 0, 1, 0, 0);
+    lctx.globalCompositeOperation = "source-over";
+    /* FLOOR is a drawing choice, not physics. With every lamp off the room
+       really is pitch black and the sensors say so, but a child staring at a
+       black square cannot tell where the furniture went, so the picture
+       keeps a little moonlight in it. Nothing reads this but the canvas. */
+    const top = peak(snap);
+    const a = Math.round(255 * clamp(Math.max(FLOOR, look(snap.ambient, top)), 0, 1));
+    lctx.fillStyle = "rgb(" + a + "," + Math.round(a * 0.97) + "," + Math.round(a * 0.91) + ")";
+    lctx.fillRect(0, 0, W, W);
+    for (const region of snap.light) paintSource(region, S, W, snap, top);
+    return lit;
+  }
+
+  /* snap is the room's snapshot, and that is all: the light is drawn from
+     the very polygons the sensors read, so the picture cannot say there is a
+     shadow where the robot says there is light. */
+  function draw(snap) {
     ctx = target;
     S = canvas.width / snap.size;
     const W = canvas.width;
@@ -305,6 +385,21 @@ export function createRoomRenderer(canvas) {
       ctx.moveTo(l.a.x * S, l.a.y * S); ctx.lineTo(l.b.x * S, l.b.y * S);
       ctx.stroke();
     }
+
+    /* The light over the floor first, at full strength: a shadow is not
+       painted, it is simply a place the light map never lit. */
+    const light = paintLight(snap, S, W);
+    ctx.save();
+    ctx.globalCompositeOperation = "multiply";
+    ctx.drawImage(light, 0, 0);
+    ctx.restore();
+
+    /* The furniture goes on its own layer so the same light can fall on it
+       more gently - see STANDING. */
+    if (stage.width !== W) stage.width = stage.height = W;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, W, W);
+    ctx = sctx;
 
     for (const b of snap.furniture) {
       const ox = (b.x + b.w / 2) * S, oy = (b.y + b.h / 2) * S;
@@ -331,18 +426,28 @@ export function createRoomRenderer(canvas) {
       }
     }
 
-    /* Now the light, multiplied over the floor AND over everything standing
-       on it. That multiply is the whole trick: a shadow is not painted, it is
-       simply a place the light map never lit. The lamps and the robots come
-       after it, because a bulb and an LED are lights themselves. */
-    if (light) {
-      paintLight(light.map, light.n, light.mark);
-      ctx.save();
-      ctx.globalCompositeOperation = "multiply";
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(lmap, 0, 0, W, W);
-      ctx.restore();
-    }
+    /* The light, over the furniture. A multiply spreads past the shapes on
+       to the empty parts of this layer, so the shapes are kept as a mask and
+       put back afterwards - otherwise the whole room gets a second coat. */
+    octx.setTransform(1, 0, 0, 1, 0, 0);
+    octx.globalCompositeOperation = "source-over";
+    octx.clearRect(0, 0, W, W);
+    octx.drawImage(stage, 0, 0);
+
+    sctx.save();
+    sctx.globalCompositeOperation = "multiply";
+    sctx.globalAlpha = STANDING;
+    sctx.drawImage(light, 0, 0);
+    sctx.globalAlpha = 1;
+    sctx.globalCompositeOperation = "destination-in";
+    sctx.drawImage(one, 0, 0);
+    sctx.restore();
+
+    ctx = target;
+    ctx.drawImage(stage, 0, 0);
+
+    /* The lamps and the robots come last, because a bulb and an LED are
+       lights themselves - nothing dims them. */
 
     for (const L of snap.lamps) drawBulb(L);
     for (const b of snap.bodies) drawBody(b);
@@ -372,5 +477,5 @@ export function createRoomRenderer(canvas) {
   }
 
   const toRoom = (sx, sy, size) => ({ x: sx / canvas.width * size, y: sy / canvas.height * size });
-  return { draw, toRoom, LMAP_N };
+  return { draw, toRoom };
 }

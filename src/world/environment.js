@@ -102,8 +102,16 @@ export function createEnvironment(data) {
         lines: surface.lines(),
         sun: scene.sun,
         ambient: light.ambient(),
-        sources: light.sources().map(s => ({ ...s })),
-        shadows: light.shadows().map(set => set.map(e => ({ poly: e.poly }))),
+        /* One entry per light source: where it is, the lit region it can see,
+           and the shadows of everything shorter than it. The renderer draws
+           from exactly this, so the picture and the sensor readings are built
+           from the same polygons and cannot drift apart. */
+        light: light.regions().map(r => ({
+          source: { ...r.source },
+          quads: r.quads,
+          visible: r.visible,
+          profile: r.profile
+        })),
         bodies: geometry.bodies().map(b => ({
           id: b.id, x: b.x, y: b.y, h: b.h, r: b.r, z: b.z, held: !!b.held
         }))

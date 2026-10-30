@@ -163,7 +163,7 @@ function frame() {
   try {
     room.tick();
     snap = room.snapshot();
-    renderer.draw(snap, room.lightMap(renderer.LMAP_N));
+    renderer.draw(snap);
     overlay();
     buildSwitches();
     readout();

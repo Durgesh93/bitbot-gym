@@ -133,6 +133,36 @@ describe("the light field", () => {
     expect(far(20)).toBeGreaterThan(far(60));
   });
 
+  describe("how far a shadow reaches", () => {
+    /* The rule: something SHORTER than the lamp throws a shadow that ends,
+       and something taller throws one that runs until it meets a wall. That
+       is the difference between a torch on the floor and a ceiling panel,
+       and it is what the light lessons are built on. */
+    const lampLow = { x: 1000, y: 300, kind: "floor" };          // bulb 300 mm up
+    const far = { x: 1000, y: 1900 };
+
+    it("lets a tall thing darken the floor all the way to the wall", () => {
+      const { light } = build({ lamps: [lampLow], furniture: [{ name: "chair", x: 905, y: 600 }] });
+      expect(light.at(far, eye(-Math.PI / 2))).toBeLessThan(0.1);   // chair is 450 mm, taller
+    });
+
+    it("lets a short thing's shadow run out before it gets there", () => {
+      const { light } = build({ lamps: [lampLow], furniture: [{ name: "notebook", x: 930, y: 600 }] });
+      expect(light.at(far, eye(-Math.PI / 2))).toBeGreaterThan(0.1);  // 20 mm, barely a shadow
+    });
+
+    it("still ends a robot's shadow under a ceiling light", () => {
+      /* Nothing in a classroom is taller than a 2.5 m panel, so every shadow
+         indoors is the ending kind, which is what it was before. */
+      const { geometry, light } = build({ lamps: [{ x: 1000, y: 1000, kind: "ceiling" }] });
+      geometry.setBodies([{ id: 1, x: 1000, y: 1400, r: 62, z: 95 }]);
+      light.stale();
+      const close = light.at({ x: 1000, y: 1480 }, eye(Math.PI / 2));
+      const beyond = light.at({ x: 1000, y: 1800 }, eye(Math.PI / 2));
+      expect(close).toBeLessThan(beyond);
+    });
+  });
+
   it("floods an outdoor scene with far more light than a classroom ever has", () => {
     /* A lit classroom is about 3 gym units. This is the honest reason a
        light-seeking program stops working outdoors, and it belongs in the
@@ -141,5 +171,53 @@ describe("the light field", () => {
     const sunny = build({ walls: false, sun: { azimuth: 140, elevation: 35, I: 600 } });
     expect(indoor.light.at({ x: 1000, y: 1400 }, eye(0))).toBeLessThan(6);
     expect(sunny.light.at({ x: 1000, y: 1400 }, eye(0))).toBeGreaterThan(100);
+  });
+
+  /* The renderer draws its glow from this curve instead of restating the
+     inverse-square law, which is the only way the picture and the sensor
+     readings are guaranteed to agree. These tests are that guarantee. */
+  describe("the profile it hands the renderer", () => {
+    it("starts at what a sensor would read under the lamp", () => {
+      const { light } = build({ lamps: [{ x: 1000, y: 1000, kind: "ceiling" }] });
+      const r = light.regions()[0];
+      expect(r.profile.e[0]).toBeCloseTo(light.at({ x: 1000, y: 1000 }, { z: 0 }), 6);
+    });
+
+    it("falls away at the rate the field itself falls away", () => {
+      const { light } = build({ lamps: [{ x: 1000, y: 1000, kind: "ceiling" }] });
+      const r = light.regions()[0];
+      const step = r.profile.reach / (r.profile.e.length - 1);
+      for (const k of [1, 3, 6]) {
+        /* due east of the lamp, where nothing stands in the way */
+        const here = light.at({ x: 1000 + step * k, y: 1000 }, { z: 0 });
+        expect(r.profile.e[k]).toBeCloseTo(here, 2);
+      }
+    });
+
+    it("never brightens with distance, whatever the furniture bounces back", () => {
+      /* A radial gradient can only say one thing per radius, so a bright
+         table on one side must not become a bright ring on every side. */
+      const { light } = build({
+        lamps: [{ x: 1000, y: 1000, kind: "ceiling" }],
+        furniture: [{ name: "table", x: 1300, y: 900, w: 500, h: 300, z: 700, reflect: 0.8 }]
+      });
+      const e = light.regions()[0].profile.e;
+      for (let k = 1; k < e.length; k++) expect(e[k]).toBeLessThanOrEqual(e[k - 1]);
+    });
+
+    it("ignores the shadows, because the renderer cuts those out itself", () => {
+      const lamps = [{ x: 1000, y: 1000, kind: "ceiling" }];
+      const bare = build({ lamps });
+      const blocked = build({
+        lamps,
+        /* matt black, so the only thing it changes is the shadow */
+        furniture: [{ name: "box", x: 1200, y: 900, w: 300, h: 300, z: 1800, reflect: 0 }]
+      });
+      /* the tall box darkens a real reading, but must not dim the glow */
+      expect(blocked.light.at({ x: 1700, y: 900 }, { z: 0 }))
+        .toBeLessThan(bare.light.at({ x: 1700, y: 900 }, { z: 0 }));
+      expect(blocked.light.regions()[0].profile.e[3])
+        .toBeCloseTo(bare.light.regions()[0].profile.e[3], 1);
+    });
   });
 });
