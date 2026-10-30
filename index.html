@@ -301,6 +301,8 @@ const BOT = {
   senFwd: 55,      // light sensors sit this far forward
   senSide: 34,     // and this far out to each side
   senAngle: 0.44,  // each one faces about 25 degrees outwards
+  senZ: 42,        // and sits this high off the floor, on top of the board
+  senTilt: 0.80,   // it looks UP and forward, 46 degrees off vertical
   lineFwd: 42,     // line sensors underneath, near the front
   lineSide: 18,
   sonarFwd: 62
@@ -323,6 +325,7 @@ function makeBot(name, x, y) {
     lm: 0, rm: 0, vl: 0, vr: 0, brake: false,
     enc: { l: 0, r: 0 }, bias: { dir: null, amount: 0 },
     model: "XL", batt: 100,
+    afwd: 0, aside: 0, pv: 0, warm: 0,      // what the accelerometer and the thermometer feel
     pixels: new Array(12).fill(null), pixelBright: 40,
     trail: []
   };
@@ -339,6 +342,7 @@ function makeDevice(kind, name, colour, x, y) {
     screen: new Array(25).fill(0),
     radioGroup: 0,
     timers: [], token: 0, foreverQueue: [], handlers: {}, noted: new Set(),
+    held: { A: false, B: false, logo: false }, beeping: 0,   // buttons under a finger, buzzer sounding
     bot: null
   };
   if (kind === "bitbot") d.bot = makeBot(name, x, y);
@@ -459,6 +463,13 @@ function physics(dt) {
 
     const v = (b.vl + b.vr) / 2;
     const w = (b.vl - b.vr) / BOT.axle;     // canvas y points down, so this is clockwise-positive
+    // the board on top feels all of this: a shove along its nose, a push sideways
+    // in a turn, and the gearboxes slowly warming the whole robot up
+    b.afwd = h > 0 ? (v - b.pv) / h : 0;
+    b.aside = v * w;
+    b.pv = v;
+    const effort = (Math.abs(b.lm) + Math.abs(b.rm)) / 200;
+    b.warm = clamp(b.warm + (effort * 1.4 - b.warm * 0.1) * h, 0, 7);
     b.x += v * Math.cos(b.h) * h;
     b.y += v * Math.sin(b.h) * h;
     b.h += w * h;
@@ -598,6 +609,16 @@ function toWorld(bx, p) {
   const o = objCentre(bx), c = objC(bx), s = objS(bx);
   return { x: o.x + p.x * c - p.y * s, y: o.y + p.x * s + p.y * c };
 }
+// turn it, copy it, take it away - kept clear of small things so they do not overlap
+function handlesOf(bx) {
+  const ox = Math.max(bx.w / 2, 60) + 55, oy = Math.max(bx.h / 2, 60) + 55;
+  return {
+    turn: toWorld(bx, { x: ox, y: 0 }),
+    copy: toWorld(bx, { x: -ox, y: 0 }),
+    del: toWorld(bx, { x: 0, y: -oy })
+  };
+}
+
 function objContains(bx, p) {
   const l = toLocal(bx, p);
   return Math.abs(l.x) <= bx.w / 2 && Math.abs(l.y) <= bx.h / 2;
@@ -683,8 +704,8 @@ function buildBounce() {
   for (const bx of world.boxes) {
     const r = bx.reflect == null ? 0.4 : bx.reflect;
     if (r < 0.05) continue;
-    const cx = bx.x + bx.w / 2, cy = bx.y + bx.h / 2;
-    const e = illuminance(cx, cy, null, bx, false);
+    const cx = bx.x, cy = bx.y;                   // a thing is placed by its middle
+    const e = illuminance(cx, cy, undefined, bx, false);
     if (e < 0.02) continue;
     // the lit face is what throws light back: the top, or the sides if it stands tall
     const face = Math.max(bx.w * bx.h, 2 * (bx.w + bx.h) * (bx.z || 100));
@@ -693,22 +714,35 @@ function buildBounce() {
   }
 }
 
-function illuminance(x, y, facing, self, withBounce) {
+/* How much light falls on one spot, in three dimensions - because HEIGHT is
+   the whole story here. A ceiling light is 2.4 m up, so its light comes almost
+   straight DOWN the sensor's z axis and turning the robot on the spot barely
+   changes the reading. A torch sits at 110 mm, level with the sensors, so its
+   light comes in sideways and the two eyes disagree - which is what makes
+   chasing a torch work at all.
+     facing a number -> a Bit:Bot eye, which looks up and forward
+     facing null     -> the LED screen, lying flat and looking straight up
+     facing left out -> no direction at all, for working out room bounce      */
+function illuminance(x, y, facing, self, withBounce, sz) {
   if (shadowsStale) { buildShadows(); shadowsStale = false; }
-  let e = anyCeiling() ? 0.20 : 0.004;          // light bouncing round the room          // light bouncing round the room
+  const z = sz === undefined ? 0 : sz;               // how high the sensor itself is
+  let e = anyCeiling() ? 0.20 : 0.004;               // light bouncing round the room
   for (const L of lampsOn()) {
-    const dx = L.x - x, dy = L.y - y;
-    const d2 = (dx * dx + dy * dy) / 1e6;            // m^2
+    const dx = L.x - x, dy = L.y - y, dz = L.H - z;
+    const d2 = (dx * dx + dy * dy + dz * dz) / 1e6;  // m^2, all three axes
+    const d = Math.sqrt(d2) * 1000 || 1;
     let aim = 1;
-    if (facing !== null && facing !== undefined) {
-      const d = Math.sqrt(d2) * 1000 || 1;
-      const cos = (Math.cos(facing) * dx + Math.sin(facing) * dy) / d;
+    if (facing === null) {
+      aim = Math.max(dz / d, 0);                     // flat on its back: only what is above counts
+      if (aim <= 0) continue;
+    } else if (facing !== undefined) {
+      const nh = Math.sin(BOT.senTilt), nz = Math.cos(BOT.senTilt);
+      const cos = (Math.cos(facing) * nh * dx + Math.sin(facing) * nh * dy + nz * dz) / d;
       if (cos <= 0) continue;                        // the lamp is behind this sensor
-      aim = cos;                                     // Lambert
+      aim = Math.max(cos, 0.12);                     // the clear dome scatters a little in from the side
     }
     if (inShadow(x, y, L.key, self)) continue;       // this spot is in that lamp's shadow
-    const h2 = (L.H / 1000) * (L.H / 1000);          // the lamp is up in the air, not on the floor
-    e += L.I * aim / (d2 + h2 + 0.09);               // inverse square, softened close up
+    e += L.I * aim / (d2 + 0.09);                    // inverse square, softened close up
   }
   if (withBounce !== false) {
     for (const B of BOUNCE) {
@@ -732,14 +766,15 @@ function readLightSensor(b, which) {
   const p = sensorPoint(b, BOT.senFwd, side);
   const facing = b.h + (which === "L" ? -BOT.senAngle : BOT.senAngle);
   // real sensors jitter by a unit or two, which is also what breaks a dead heat
-  let v = ldr(illuminance(p.x, p.y, facing, b), 1023) + Math.round(Math.random() * 6 - 3);
+  let v = ldr(illuminance(p.x, p.y, facing, b, true, BOT.senZ), 1023) + Math.round(Math.random() * 6 - 3);
   if (cfg.invert) v = 1023 - v;
   return clamp(v, 0, 1023);
 }
 // the micro:bit's own screen doubles as a light meter, wherever the board is
 function readScreenLight(m) {
   const p = placeOf(m);
-  return ldr(illuminance(p.x, p.y, null, botOf(m)), 255);
+  const b = botOf(m);
+  return ldr(illuminance(p.x, p.y, null, b, true, b ? BOT.senZ : 5), 255);
 }
 function readLineSensor(b, which) {
   const side = which === "L" ? -BOT.lineSide : which === "R" ? BOT.lineSide : 0;   // C is the PRO's middle one
@@ -771,6 +806,38 @@ function magneticForce(m, axis) {
   if (axis === "y") return Math.round((H * Math.cos(t) + noise()) * 10) / 10;
   if (axis === "z") return Math.round((Z + noise()) * 10) / 10;
   return Math.round((FIELD.total + noise()) * 10) / 10;
+}
+
+/* ---- what the board itself feels ------------------------------------------
+   A micro:bit in a child's hand lies flat and still. One bolted to a Bit:Bot
+   is shaken by its own gearboxes, warmed by them, shoved along its nose when
+   it starts and pushed sideways when it turns. All of that is what the
+   microphone, the thermometer and the accelerometer actually read. */
+function readSoundLevel(m) {
+  const b = botOf(m);
+  let v = 26 + Math.random() * 8;                  // a quiet classroom still hums
+  if (b) v += (Math.abs(b.lm) + Math.abs(b.rm)) / 200 * 130;    // the motors are the loudest thing
+  if (simTime < m.beeping) v = 212 + Math.random() * 24;         // its own buzzer drowns the lot
+  return clamp(Math.round(v), 0, 255);
+}
+function readTemperature(m) {
+  const b = botOf(m);
+  return Math.round(21 + 1 + (b ? b.warm : 0));    // the chip always reads a bit above the room
+}
+// milli-g on each axis. Lying flat and still, z reads about -1024: gravity.
+function accelMg(m, axis) {
+  const b = botOf(m);
+  const shake = b ? (Math.abs(b.lm) + Math.abs(b.rm)) / 200 * 26 : 0;
+  const n = () => (Math.random() - 0.5) * (7 + shake);
+  const fx = (b ? b.aside : 0) / 9.81, fy = (b ? b.afwd : 0) / 9.81;   // mm/s^2 -> milli-g
+  if (axis === "x") return Math.round(fx + n());
+  if (axis === "y") return Math.round(fy + n());
+  if (axis === "z") return Math.round(-1024 + n());
+  return Math.round(Math.sqrt(fx * fx + fy * fy + 1024 * 1024));
+}
+function rotationDeg(m, which) {
+  const a = accelMg(m, which === "pitch" ? "y" : "x");
+  return Math.round(Math.atan2(a, 1024) * 180 / Math.PI);
 }
 
 /* ---- sonar: a cone, not a laser, and a wall at a slant sends the ping away --- */
@@ -994,6 +1061,8 @@ const ENUMS = {
   soundExpression: new Proxy({}, { get: (_, k) => String(k) }),
   DisplayMode: { BlackAndWhite: 0 },
   Dimension: { X: "x", Y: "y", Z: "z", Strength: "s" },
+  Rotation: { Pitch: "pitch", Roll: "roll" },
+  DetectedSound: { Loud: "loud", Quiet: "quiet" },
 
   /* ---- the Bit:Bot side, straight from the 4tronix extension ----
      Values are names rather than numbers, so whatever order 4tronix chose
@@ -1089,12 +1158,19 @@ function makeApi(m) {
   };
   const input = {
     lightLevel: () => readScreenLight(m),
-    temperature: () => 21,
-    buttonIsPressed: () => false,
+    soundLevel: () => readSoundLevel(m),
+    temperature: () => readTemperature(m),
+    buttonIsPressed: (btn) => btn === "AB" ? (m.held.A && m.held.B) : !!m.held[btn],
     onButtonPressed: (btn, cb) => { m.handlers[btn] = cb; },
     onGesture: (g, cb) => { m.handlers[g] = cb; },
+    isGesture: () => false,
     onLogoEvent: (e, cb) => { m.handlers.logo = cb; },
-    acceleration: () => 0,
+    logoIsPressed: () => m.held.logo,
+    pinIsPressed: (pin) => pin === "logo" ? m.held.logo : false,
+    onSound: (which, cb) => { m.handlers["sound" + which] = cb; },
+    setSoundThreshold: () => {},
+    acceleration: (dim) => accelMg(m, dim),
+    rotation: (which) => rotationDeg(m, which),
     compassHeading: () => compassHeadingDeg(m),
     magneticForce: (dim) => magneticForce(m, dim),
     calibrateCompass: () => sayd("compass calibrated"),
@@ -1114,9 +1190,15 @@ function makeApi(m) {
     }
   };
   const music = {
-    play: async (what, mode) => { sayd("sound: " + what); await wait(m, mode === 1 ? 0 : 500); },
-    playTone: async (f, ms) => { sayd("tone " + Math.round(f) + " Hz"); await wait(m, ms); },
-    ringTone: (f) => sayd("tone " + Math.round(f) + " Hz"),
+    play: async (what, mode) => {
+      sayd("sound: " + what); m.beeping = simTime + 500;      // loud enough for its own microphone
+      await wait(m, mode === 1 ? 0 : 500);
+    },
+    playTone: async (f, ms) => {
+      sayd("tone " + Math.round(f) + " Hz"); m.beeping = simTime + ms;
+      await wait(m, ms);
+    },
+    ringTone: (f) => { sayd("tone " + Math.round(f) + " Hz"); m.beeping = simTime + 1000; },
     rest: async (ms) => { await wait(m, ms); },
     builtinPlayableSoundEffect: (s) => String(s),
     tonePlayable: (n, b) => String(n),
@@ -1503,6 +1585,8 @@ async function runDevice(m) {
     running = true;
     loop();
   }
+  const p0 = placeOf(m);
+  m.start = { x: p0.x, y: p0.y, h: p0.h };        // Reset brings it back here
   m.live = true;
   say("play", "say", m);
   await runOne(m);
@@ -1512,6 +1596,42 @@ function stopDevice(m) {
   m.token++; killTimers(m); m.foreverQueue = []; m.live = false;
   if (m.bot) { m.bot.lm = m.bot.rm = 0; m.bot.brake = true; }
   say("stopped", "say", m);
+}
+
+/* Put one back exactly as it was before it ran: stopped, screen blank, lights
+   out, wheels unwound, battery full, standing where Play found it. A child can
+   try the same program again and again and see the same thing happen. */
+function resetDevice(m) {
+  m.token++; killTimers(m); m.foreverQueue = []; m.live = false;
+  m.handlers = {}; m.noted = new Set();
+  m.held.A = m.held.B = m.held.logo = false; m.beeping = 0;
+  m.radioGroup = 0;
+  setScreen(m, "0".repeat(25));
+  const p = placeOf(m);
+  if (m.start) { p.x = m.start.x; p.y = m.start.y; p.h = m.start.h; }
+  const b = m.bot;
+  if (b) {
+    b.lm = b.rm = b.vl = b.vr = b.pv = b.afwd = b.aside = b.warm = 0;
+    b.brake = false; b.enc.l = b.enc.r = 0; b.batt = 100;
+    b.pixels = new Array(12).fill(null); b.pixelBright = 40; b.trail = [];
+    b.bias = { dir: null, amount: 0 };
+  }
+  const c = stageCards.get("m" + m.id);
+  if (c && c.log) c.log.innerHTML = "";
+  say("reset - back at the start", "say", m);
+  shadowsStale = true;
+  draw(); instruments(); updateStage();
+}
+
+// nobody left running, every board back at its start, clock at zero
+function resetAll() {
+  running = false;
+  for (const m of world.mbits) resetDevice(m);
+  simTime = 0;
+  log.innerHTML = "";
+  stageCards.forEach(c => { if (c.log) c.log.innerHTML = ""; });
+  say("everything is back at the start", "say");
+  draw(); instruments(); updateStage();
 }
 
 function stopAll(quiet) {
@@ -1738,23 +1858,29 @@ function draw() {
       ctx.textAlign = "left";
     }
 
-    // one handle turns it, the other makes another one
-    const hub = toWorld(b, { x: b.w / 2 + 55, y: 0 });
-    ctx.beginPath(); ctx.arc(hub.x * S, hub.y * S, 9 * S, 0, 7);
-    ctx.fillStyle = "rgba(91,192,235,0.22)"; ctx.fill();
-    ctx.strokeStyle = "rgba(91,192,235,0.75)"; ctx.lineWidth = 1.4; ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(hub.x * S, hub.y * S, 4.5 * S, 0.6, 5.1);
+    // three handles: turn it, copy it, take it away
+    const H = handlesOf(b), rr = 9 * S;
+    const disc = (pt, tint, line) => {
+      ctx.beginPath(); ctx.arc(pt.x * S, pt.y * S, rr, 0, 7);
+      ctx.fillStyle = tint; ctx.fill();
+      ctx.strokeStyle = line; ctx.lineWidth = 1.4; ctx.stroke();
+    };
+    disc(H.turn, "rgba(91,192,235,0.22)", "rgba(91,192,235,0.75)");
+    ctx.beginPath(); ctx.arc(H.turn.x * S, H.turn.y * S, 4.5 * S, 0.6, 5.1);
     ctx.strokeStyle = "rgba(91,192,235,0.95)"; ctx.lineWidth = 1.6; ctx.stroke();
 
-    const cop = toWorld(b, { x: -(b.w / 2 + 55), y: 0 });
-    ctx.beginPath(); ctx.arc(cop.x * S, cop.y * S, 9 * S, 0, 7);
-    ctx.fillStyle = "rgba(70,195,123,0.22)"; ctx.fill();
-    ctx.strokeStyle = "rgba(70,195,123,0.75)"; ctx.lineWidth = 1.4; ctx.stroke();
+    disc(H.copy, "rgba(70,195,123,0.22)", "rgba(70,195,123,0.75)");
     ctx.beginPath();
-    ctx.moveTo(cop.x * S - 4.5 * S, cop.y * S); ctx.lineTo(cop.x * S + 4.5 * S, cop.y * S);
-    ctx.moveTo(cop.x * S, cop.y * S - 4.5 * S); ctx.lineTo(cop.x * S, cop.y * S + 4.5 * S);
+    ctx.moveTo(H.copy.x * S - 4.5 * S, H.copy.y * S); ctx.lineTo(H.copy.x * S + 4.5 * S, H.copy.y * S);
+    ctx.moveTo(H.copy.x * S, H.copy.y * S - 4.5 * S); ctx.lineTo(H.copy.x * S, H.copy.y * S + 4.5 * S);
     ctx.strokeStyle = "rgba(70,195,123,0.95)"; ctx.lineWidth = 1.8; ctx.stroke();
+
+    disc(H.del, "rgba(232,87,90,0.22)", "rgba(232,87,90,0.8)");
+    const d = 4.2 * S;
+    ctx.beginPath();
+    ctx.moveTo(H.del.x * S - d, H.del.y * S - d); ctx.lineTo(H.del.x * S + d, H.del.y * S + d);
+    ctx.moveTo(H.del.x * S + d, H.del.y * S - d); ctx.lineTo(H.del.x * S - d, H.del.y * S + d);
+    ctx.strokeStyle = "rgba(232,87,90,0.95)"; ctx.lineWidth = 1.9; ctx.stroke();
   }
 
   // where each robot has been, in the colour of the board driving it
@@ -2142,10 +2268,16 @@ cv.addEventListener("pointerdown", ev => {
   }
   for (let i = world.boxes.length - 1; i >= 0; i--) {
     const bx = world.boxes[i];
-    const hub = toWorld(bx, { x: bx.w / 2 + 55, y: 0 });          // the turning handle
-    if (Math.hypot(p.x - hub.x, p.y - hub.y) < 60) { dragging = { kind: "turn", box: bx }; return; }
-    const cop = toWorld(bx, { x: -(bx.w / 2 + 55), y: 0 });       // and the copying one
-    if (Math.hypot(p.x - cop.x, p.y - cop.y) < 60) {
+    const H = handlesOf(bx);
+    if (Math.hypot(p.x - H.del.x, p.y - H.del.y) < 48) {          // take it away
+      world.boxes = world.boxes.filter(o => o !== bx);
+      shadowsStale = true;
+      say((bx.name || "it") + " taken out of the room", "say");
+      draw(); instruments();
+      return;
+    }
+    if (Math.hypot(p.x - H.turn.x, p.y - H.turn.y) < 48) { dragging = { kind: "turn", box: bx }; return; }
+    if (Math.hypot(p.x - H.copy.x, p.y - H.copy.y) < 48) {
       const twin = Object.assign({}, bx);
       twin.x = clamp(bx.x + 110, 0, ROOM - bx.w);
       twin.y = clamp(bx.y + 110, 0, ROOM - bx.h);
@@ -2781,6 +2913,14 @@ const STAGE_CSS = `
   #stage .card.live .top b { color: #d6ffe6; }
   #stage .top { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
   #stage .top b { font-size: 15px; }
+  /* a card is in two halves: what the board feels, then what the robot feels */
+  #stage .sect { display: flex; align-items: center; gap: 7px; margin: 10px 0 5px;
+                 font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+                 color: var(--muted); font-weight: 700; }
+  #stage .sect:after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  #stage .sect.bot { color: var(--accent); }
+  #stage .sect.bot:after { background: rgba(91,192,235,0.3); }
+  #stage .card > .sect:first-of-type { margin-top: 4px; }
   #stage .dot { width: 10px; height: 10px; border-radius: 50%; display: block; }
   #stage .where { margin-left: auto; font-size: 11px; color: var(--muted); }
   #stage .body { display: flex; gap: 10px; }
@@ -2805,8 +2945,11 @@ const STAGE_CSS = `
   #stage .mlog div.say { color: var(--warn); }
   #stage .press { display: flex; gap: 4px; margin-top: 8px; }
   #stage .press button { flex: 1; padding: 4px 2px; font-size: 11px; }
+  #stage .press.keys button { font-size: 10px; padding: 4px 1px; }
+  #stage .press.keys button.down { background: var(--accent); border-color: var(--accent); color: #04202c; font-weight: 700; }
   #stage .press.run button[data-go="1"] { background: var(--go); border-color: var(--go); color: #06281a; font-weight: 700; }
   #stage .press.run button[data-go="0"] { background: var(--stop); border-color: var(--stop); color: #2b0708; font-weight: 700; }
+  #stage .press.run button[data-go="2"] { font-weight: 600; }
   #stage .arms { justify-content: space-between; }
   #stage #stageLog { flex: 1 1 auto; min-height: 90px; overflow: auto; background: #0d1017;
       border: 1px solid var(--line); border-radius: 10px; padding: 9px;
@@ -2893,6 +3036,7 @@ function buildStage() {
       '<span id="stageChips" style="display:flex;gap:6px;flex-wrap:wrap"></span>' +
       '<span class="spacer"></span>' +
       '<button id="stageStop" class="stop">Stop all</button>' +
+      '<button id="stageReset">\u21ba Reset all</button>' +
       '<label class="inline">Speed <select id="stageSpeed">' +
         '<option value="1">1x</option><option value="2">2x</option>' +
         '<option value="4">4x</option><option value="8">8x</option></select></label>' +
@@ -2906,6 +3050,7 @@ function buildStage() {
 
   stageHost.querySelector("#stageBack").addEventListener("click", closeStage);
   stageHost.querySelector("#stageStop").addEventListener("click", () => stopAll(false));
+  stageHost.querySelector("#stageReset").addEventListener("click", resetAll);
   const sp = stageHost.querySelector("#stageSpeed");
   sp.value = el("speed").value;
   sp.addEventListener("change", e => { el("speed").value = e.target.value; });
@@ -2949,35 +3094,55 @@ function syncStage() {
     grid.dataset.ids = want;
     grid.innerHTML = "";
     stageCards = new Map();
-    const rows = [["light L / R", "ll"], ["line L / R", "ln"], ["sonar", "sn"],
-                  ["light level", "lv"], ["compass", "cp"], ["motors L / R", "mo"],
-                  ["speed", "sp"], ["battery", "ba"], ["radio group", "rg"]];
+    /* Every card has a micro:bit half: the screen, and everything the board
+       itself can feel. A Bit:Bot card has a robot half underneath as well,
+       with the wheels, the eyes, the line sensors and the sonar. */
+    const MB_ROWS = [["light level", "lv"], ["sound level", "sd"], ["temperature", "tp"],
+                     ["compass", "cp"], ["magnet x/y/z", "mg"], ["accel x/y/z", "ac"],
+                     ["pitch / roll", "tl"], ["buttons", "bt"], ["radio group", "rg"]];
+    const BOT_ROWS = [["light eyes L/R", "ll"], ["line L / R", "ln"], ["sonar", "sn"],
+                      ["motors L / R", "mo"], ["speed", "sp"], ["battery", "ba"]];
+    const tbl = rows => "<table>" + rows.map(r =>
+      '<tr><td class="k">' + r[0] + '</td><td class="v" data-f="' + r[1] + '">-</td></tr>').join("") + "</table>";
+    const KEYS = [["A", "A"], ["B", "B"], ["AB", "A+B"], ["shake", "Shake"], ["logo", "Logo"]];
     for (const m of world.mbits) {
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML =
         '<div class="top"><i class="dot" style="background:' + m.colour + '"></i><b>' + m.name +
         '</b><span class="where"></span></div>' +
+        '<div class="sect">micro:bit</div>' +
         '<div class="body"><div class="scr">' + "<span></span>".repeat(25) + "</div>" +
-        "<table>" + rows.map(r => '<tr><td class="k">' + r[0] + '</td><td class="v" data-f="' + r[1] + '">-</td></tr>').join("") +
-        "</table></div>" +
-        ARMS_HTML +
+        tbl(MB_ROWS) + "</div>" +
+        '<div class="press keys">' + KEYS
+          .map(k => '<button data-k="' + k[0] + '">' + k[1] + "</button>").join("") + "</div>" +
+        (m.bot ? '<div class="sect bot">Bit:Bot ' + m.bot.model + "</div>" + tbl(BOT_ROWS) + ARMS_HTML : "") +
         '<div class="mlog"></div>' +
         '<div class="press run"><button data-go="1">\u25b6 Play</button>' +
-        '<button data-go="0">\u25a0 Stop</button></div>' +
-        '<div class="press">' + ["A", "B", "AB", "shake"]
-          .map(k => '<button data-k="' + k + '">' + (k === "AB" ? "A+B" : k === "shake" ? "Shake" : k) + "</button>").join("") +
-        "</div>";
+        '<button data-go="0">\u25a0 Stop</button>' +
+        '<button data-go="2">\u21ba Reset</button></div>';
       grid.appendChild(card);
       card.querySelectorAll(".press.run button").forEach(btn => btn.addEventListener("click", () => {
-        if (btn.dataset.go === "1") runDevice(m); else stopDevice(m);
+        if (btn.dataset.go === "1") runDevice(m);
+        else if (btn.dataset.go === "2") resetDevice(m);
+        else stopDevice(m);
       }));
-      card.querySelectorAll(".press:not(.run) button").forEach(btn => btn.addEventListener("click", () => {
-        const cb = m.handlers[btn.dataset.k];
-        if (!cb) { say("nothing is listening for " + btn.dataset.k, "say", m); return; }
-        say("pressed " + btn.dataset.k, "say", m);
-        Promise.resolve(cb()).catch(e => { if (!(e instanceof Stopped)) say(e.message, "err", m); });
-      }));
+      // a button stays down while the finger is on it, so "button A is pressed" is true
+      card.querySelectorAll(".press.keys button").forEach(btn => {
+        const k = btn.dataset.k;
+        const up = () => { m.held.A = m.held.B = m.held.logo = false; btn.classList.remove("down"); };
+        btn.addEventListener("pointerdown", () => {
+          if (k === "AB") m.held.A = m.held.B = true; else if (m.held[k] !== undefined) m.held[k] = true;
+          btn.classList.add("down");
+          const cb = m.handlers[k];
+          if (!cb) { say("nothing is listening for " + k, "say", m); return; }
+          say("pressed " + k, "say", m);
+          Promise.resolve(cb()).catch(e => { if (!(e instanceof Stopped)) say(e.message, "err", m); });
+        });
+        btn.addEventListener("pointerup", up);
+        btn.addEventListener("pointerleave", up);
+        btn.addEventListener("pointercancel", up);
+      });
       const f = {};
       card.querySelectorAll("[data-f]").forEach(td => f[td.dataset.f] = td);
       stageCards.set("m" + m.id, {
@@ -3031,17 +3196,31 @@ function updateStage() {
     c.where.textContent = m.kind === "bitbot" ? "robot" : "in hand";
     c.card.classList.toggle("idle", !m.code.trim());
     c.card.classList.toggle("live", !!m.live);
-    c.f.lv.textContent = readScreenLight(m);
-    c.f.cp.textContent = compassHeadingDeg(m) + "°";
-    c.f.rg.textContent = m.radioGroup;
-    c.f.ll.textContent = b ? readLightSensor(b, "L") + " / " + readLightSensor(b, "R") : dash;
-    c.f.ln.textContent = b ? readLineSensor(b, "L") + " / " + readLineSensor(b, "R") : dash;
-    c.f.sn.textContent = b ? readSonar(b) + " cm" : dash;
-    c.f.mo.textContent = b ? Math.round(b.lm) + " / " + Math.round(b.rm) : dash;
-    c.f.sp.textContent = b ? Math.round((b.vl + b.vr) / 2) + " mm/s" : dash;
-    c.f.ba.textContent = b ? Math.round(b.batt) + "%" : dash;
-    for (let i = 0; i < 12; i++) {
+    const set = (k, v) => { if (c.f[k]) c.f[k].textContent = v; };
+    const held = ["A", "B", "logo"].filter(k => m.held[k]);
+    // the board's own senses, which every card has
+    set("lv", readScreenLight(m));
+    set("sd", readSoundLevel(m));
+    set("tp", readTemperature(m) + " °C");
+    set("cp", compassHeadingDeg(m) + "°");
+    set("mg", magneticForce(m, "x").toFixed(1) + " / " + magneticForce(m, "y").toFixed(1) +
+              " / " + magneticForce(m, "z").toFixed(0));
+    set("ac", accelMg(m, "x") + " / " + accelMg(m, "y") + " / " + accelMg(m, "z"));
+    set("tl", rotationDeg(m, "pitch") + "° / " + rotationDeg(m, "roll") + "°");
+    set("bt", held.length ? held.join(" + ") + " down" : "none down");
+    set("rg", m.radioGroup);
+    // and the robot half, on the cards that have one
+    if (b) {
+      set("ll", readLightSensor(b, "L") + " / " + readLightSensor(b, "R"));
+      set("ln", readLineSensor(b, "L") + " / " + readLineSensor(b, "R"));
+      set("sn", readSonar(b) + " cm");
+      set("mo", Math.round(b.lm) + " / " + Math.round(b.rm));
+      set("sp", Math.round((b.vl + b.vr) / 2) + " mm/s");
+      set("ba", Math.round(b.batt) + "%");
+    }
+    for (let i = 0; i < c.leds.length; i++) {
       const col = b ? b.pixels[i] : null;
+      if (!c.leds[i]) continue;
       c.leds[i].style.background = col && col !== "#000000" ? col : "#2a2f3c";
       c.leds[i].style.boxShadow = col && col !== "#000000" ? "0 0 5px " + col : "none";
     }
