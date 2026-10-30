@@ -326,6 +326,7 @@ function makeBot(name, x, y) {
     enc: { l: 0, r: 0 }, bias: { dir: null, amount: 0 },
     model: "XL", batt: 100,
     afwd: 0, aside: 0, pv: 0, warm: 0,      // what the accelerometer and the thermometer feel
+    eyeTrim: Math.random() < 0.5 ? -1 : 1,  // this robot's own pair of eyes, one a count off the other
     pixels: new Array(12).fill(null), pixelBright: 40,
     trail: []
   };
@@ -742,8 +743,8 @@ function illuminance(x, y, facing, self, withBounce, sz) {
     } else if (facing !== undefined) {
       const nh = Math.sin(BOT.senTilt), nz = Math.cos(BOT.senTilt);
       const cos = (Math.cos(facing) * nh * dx + Math.sin(facing) * nh * dy + nz * dz) / d;
-      if (cos <= 0) continue;                        // the lamp is behind this sensor
-      aim = Math.max(cos, 0.12);                     // the clear dome scatters a little in from the side
+      if (cos <= 0) continue;                        // the board itself is in the way
+      aim = cos;                                     // Lambert, and nothing but Lambert
     }
     if (inShadow(x, y, L.key, self)) continue;       // this spot is in that lamp's shadow
     e += L.I * aim / (d2 + 0.09);                    // inverse square, softened close up
@@ -756,9 +757,13 @@ function illuminance(x, y, facing, self, withBounce, sz) {
   }
   return e;
 }
-// a light-dependent resistor saturates: lots more light makes less and less difference
+/* A light-dependent resistor saturates: twice the light is nowhere near twice
+   the number. HALF is the illuminance at which it reads about half way, so it
+   has to sit in the middle of what a lit classroom gives - otherwise every
+   reading piles up at the top of the scale and the two eyes look identical. */
+const LDR_HALF = 3.0;
 function ldr(e, full) {
-  const r = e / (e + 0.45);
+  const r = e / (e + LDR_HALF);
   return clamp(Math.round(full * Math.pow(r, 0.85)), 0, full);
 }
 function sensorPoint(b, fwd, side) {
@@ -772,7 +777,8 @@ function readLightSensor(b, which) {
   // a moving robot's sensors jitter by a unit or two, which is also what breaks
   // a dead heat between two eyes reading exactly the same thing
   let v = ldr(illuminance(p.x, p.y, facing, b, true, BOT.senZ), 1023)
-          + Math.round((Math.random() * 6 - 3) * stirBot(b)) + (which === "L" ? 1 : -1);
+          + Math.round((Math.random() * 6 - 3) * stirBot(b))
+          + (which === "L" ? (b.eyeTrim || 0) : -(b.eyeTrim || 0));
   if (cfg.invert) v = 1023 - v;
   return clamp(v, 0, 1023);
 }
@@ -3335,11 +3341,11 @@ function syncStage() {
     /* Every card has a micro:bit half: the screen, and everything the board
        itself can feel. A Bit:Bot card has a robot half underneath as well,
        with the wheels, the eyes, the line sensors and the sonar. */
-    const MB_ROWS = [["light 0-255", "lv"], ["sound 0-255", "sd"], ["temp", "tp"],
+    const MB_ROWS = [["light", "lv"], ["sound", "sd"], ["temp", "tp"],
                      ["compass", "cp"], ["field \u00b5T", "mg"], ["accel mg", "ac"],
-                     ["pitch/roll", "tl"], ["buttons", "bt"], ["radio group", "rg"]];
+                     ["pitch/roll", "tl"], ["buttons", "bt"], ["radio", "rg"]];
     const BOT_ROWS = [["eyes L/R", "ll"], ["line L/R", "ln"], ["sonar", "sn"],
-                      ["motors %", "mo"], ["speed", "sp"], ["battery", "ba"]];
+                      ["motors", "mo"], ["speed", "sp"], ["battery", "ba"]];
     const tbl = rows => "<table>" + rows.map(r =>
       '<tr><td class="k">' + r[0] + '</td><td class="v" data-f="' + r[1] + '">-</td></tr>').join("") + "</table>";
     const KEYS = [["A", "A"], ["B", "B"], ["AB", "A+B"], ["shake", "Shake"], ["logo", "Logo"]];
@@ -3441,26 +3447,28 @@ function updateStage() {
     c.card.classList.toggle("idle", !m.code.trim());
     c.card.classList.toggle("live", !!m.live);
     const set = (k, v) => { if (numbers && c.f[k]) c.f[k].textContent = v; };
+    // every reading three digits wide, so nothing jumps about as the numbers change
+    const d3 = n => (n < 0 ? "-" : "") + String(Math.abs(Math.round(n))).padStart(3, "0");
     const held = ["A", "B", "logo"].filter(k => m.held[k]);
     // the board's own senses, which every card has
-    set("lv", readScreenLight(m));
-    set("sd", readSoundLevel(m));
-    set("tp", readTemperature(m) + " °C");
-    set("cp", compassHeadingDeg(m) + "°");
-    set("mg", magneticForce(m, "x").toFixed(1) + " / " + magneticForce(m, "y").toFixed(1) +
-              " / " + magneticForce(m, "z").toFixed(0));
-    set("ac", accelMg(m, "x") + " / " + accelMg(m, "y") + " / " + accelMg(m, "z"));
-    set("tl", rotationDeg(m, "pitch") + "° / " + rotationDeg(m, "roll") + "°");
+    set("lv", d3(readScreenLight(m)));
+    set("sd", d3(readSoundLevel(m)));
+    set("tp", d3(readTemperature(m)) + " °C");
+    set("cp", d3(compassHeadingDeg(m)) + "°");
+    set("mg", d3(magneticForce(m, "x")) + " / " + d3(magneticForce(m, "y")) +
+              " / " + d3(magneticForce(m, "z")));
+    set("ac", d3(accelMg(m, "x")) + " / " + d3(accelMg(m, "y")) + " / " + d3(accelMg(m, "z")));
+    set("tl", d3(rotationDeg(m, "pitch")) + "° / " + d3(rotationDeg(m, "roll")) + "°");
     set("bt", held.length ? held.join(" + ") + " down" : "none down");
     set("rg", m.radioGroup);
     // and the robot half, on the cards that have one
     if (b) {
-      set("ll", readLightSensor(b, "L") + " / " + readLightSensor(b, "R"));
-      set("ln", readLineSensor(b, "L") + " / " + readLineSensor(b, "R"));
-      set("sn", readSonar(b) + " cm");
-      set("mo", Math.round(b.lm) + " / " + Math.round(b.rm));
-      set("sp", Math.round((b.vl + b.vr) / 2) + " mm/s");
-      set("ba", Math.round(b.batt) + "%");
+      set("ll", d3(readLightSensor(b, "L")) + " / " + d3(readLightSensor(b, "R")));
+      set("ln", d3(readLineSensor(b, "L")) + " / " + d3(readLineSensor(b, "R")));
+      set("sn", d3(readSonar(b)) + " cm");
+      set("mo", d3(b.lm) + " / " + d3(b.rm));
+      set("sp", d3((b.vl + b.vr) / 2) + " mm/s");
+      set("ba", d3(b.batt) + "%");
     }
     for (let i = 0; i < c.leds.length; i++) {
       const col = b ? b.pixels[i] : null;
