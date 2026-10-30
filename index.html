@@ -1,0 +1,1792 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bit:Bot Gym</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#11141c">
+<link rel="icon" href="icon-192.png">
+<meta name="description" content="A Bit:Bot XL simulator with the real MakeCode block editor.">
+<style>
+/* A workbench, not a toy: the room in the middle, the code on the left,
+   the instruments on the right, so you can watch a decision and its cause together. */
+:root {
+  --bg: #11141c;
+  --panel: #1a1f2b;
+  --panel-2: #222938;
+  --line: #313a4e;
+  --fg: #eef2f8;
+  --muted: #9aa7bd;
+  --accent: #5bc0eb;
+  --go: #46c37b;
+  --stop: #e8575a;
+  --warn: #f2b134;
+  --led-on: #ff3b3b;
+  --led-off: #3a2a2a;
+  --f-ui: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* , *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); }
+body { font-family: var(--f-ui); font-size: 14px; line-height: 1.4; padding: 14px; }
+
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-bottom: 12px; }
+header h1 { margin: 0; font-size: 22px; letter-spacing: .01em; }
+header h1 span { color: var(--accent); }
+header .tag { color: var(--muted); font-size: 12.5px; max-width: 46ch; }
+.spacer { flex: 1; }
+
+button, select, input[type=number] {
+  font: inherit; font-size: 13px; color: var(--fg); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px; cursor: pointer;
+}
+button:hover { border-color: #4a586f; }
+button.go { background: var(--go); border-color: var(--go); color: #06281a; font-weight: 700; }
+button.stop { background: var(--stop); border-color: var(--stop); color: #2b0708; font-weight: 700; }
+button.on { background: var(--accent); border-color: var(--accent); color: #062430; font-weight: 700; }
+button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+label.inline { color: var(--muted); font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
+
+.layout { display: grid; gap: 12px; grid-template-columns: minmax(430px, 1fr) minmax(0, 560px) 262px; align-items: start; }
+@media (max-width: 1340px) { .layout { grid-template-columns: minmax(0,1fr) 262px; } .code { grid-column: 1 / -1; } }
+/* for explaining at the board: give the blocks the width and keep just the room */
+body.wide .layout { grid-template-columns: minmax(0, 1fr) 340px; }
+body.wide .instr { display: none; }
+body.wide iframe#editor, body.wide .editor-off { height: 700px; }
+@media (max-width: 820px)  { .layout { grid-template-columns: minmax(0,1fr); } }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 13px; padding: 12px; }
+.panel > h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 600; }
+
+/* code side */
+.tabs { display: flex; gap: 6px; margin-bottom: 9px; }
+.tabs button { padding: 6px 13px; font-size: 12.5px; }
+iframe#editor { width: 100%; height: 620px; border: 1px solid var(--line); border-radius: 9px; background: #0d1017; display: block; }
+.editor-off { height: 620px; display: grid; place-content: center; text-align: center; gap: 10px;
+  border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); padding: 20px; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.presets button { padding: 5px 10px; font-size: 12px; }
+textarea#src {
+  width: 100%; height: 430px; resize: vertical; background: #0d1017; color: #dfe7f3;
+  border: 1px solid var(--line); border-radius: 9px; padding: 10px;
+  font-family: var(--f-mono); font-size: 12.5px; line-height: 1.5; tab-size: 4; white-space: pre; overflow: auto;
+}
+.hint { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+
+/* room side */
+.roomwrap { position: relative; }
+canvas#room { width: 100%; height: auto; aspect-ratio: 1/1; display: block; border-radius: 10px; background: #0d1017; touch-action: none; }
+.tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+.tools .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+.tools button { padding: 6px 10px; font-size: 12px; }
+
+/* instruments */
+.instr { display: grid; gap: 10px; }
+.screen { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; background: #08080c; border-radius: 9px; padding: 9px; width: 130px; margin: 0 auto; }
+.screen span { aspect-ratio: 1/1; border-radius: 2px; background: var(--led-off); }
+.screen span.on { background: var(--led-on); box-shadow: 0 0 6px var(--led-on); }
+.pixrow { display: flex; justify-content: center; gap: 4px; margin-top: 8px; }
+.pixrow i { width: 11px; height: 11px; border-radius: 50%; background: #2a2f3c; display: block; }
+table.read { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.read td { padding: 3px 0; }
+table.read td.k { color: var(--muted); }
+table.read td.v { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.bar { height: 7px; border-radius: 4px; background: #2a3141; overflow: hidden; margin-top: 3px; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+.mbtns { display: flex; gap: 6px; }
+.mbtns button { flex: 1; padding: 6px 4px; font-size: 12px; }
+#log { height: 150px; overflow: auto; background: #0d1017; border: 1px solid var(--line); border-radius: 9px; padding: 8px; font-family: var(--f-mono); font-size: 11.5px; line-height: 1.5; color: #c6d2e4; }
+#log div { white-space: pre-wrap; }
+#log div.err { color: #ff9a9a; }
+#log div.say { color: var(--warn); }
+.sliders { display: grid; gap: 6px; font-size: 12.5px; }
+.sliders label { display: grid; grid-template-columns: 1fr 52px; gap: 6px; align-items: center; color: var(--muted); }
+.sliders input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.sliders b { font-family: var(--f-mono); color: var(--fg); font-weight: 500; text-align: right; }
+footer { color: var(--muted); font-size: 12px; margin-top: 14px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Bit:Bot <span>Gym</span></h1>
+  <p class="tag">Write the blocks in MakeCode, copy what its JavaScript tab shows, paste it here, and watch the robot do it. Nobody has to wait for the real one.</p>
+  <span class="spacer"></span>
+  <button id="run" class="go">Run</button>
+  <button id="stopBtn" class="stop">Stop</button>
+  <button id="step">Step 0.1s</button>
+  <label class="inline">Speed
+    <select id="speed">
+      <option value="1" selected>1x</option>
+      <option value="2">2x</option>
+      <option value="4">4x</option>
+      <option value="8">8x</option>
+    </select>
+  </label>
+  <button id="openHex">Open a .hex</button>
+  <input type="file" id="hexFile" accept=".hex" hidden>
+  <button id="wide">Big blocks</button>
+  <label class="inline"><input type="checkbox" id="sound" checked> sound</label>
+</header>
+
+<div class="layout">
+
+  <section class="panel code">
+    <h2>Program</h2>
+    <div id="pane-blocks">
+      <div class="presets">
+        <button id="pullCode" class="go">Take the code &amp; run</button>
+      </div>
+      <div id="editorSlot">
+        <div class="editor-off">
+          <b style="color:var(--fg);font-size:15px">Starting MakeCode&hellip;</b>
+          <span>It opens with the 4tronix Bit:Bot extension already added, so both sets of
+          drawers are there. This part needs the internet.</span>
+        </div>
+      </div>
+      <p class="hint">Build your blocks on the left and press <b>Run</b>. Every time MakeCode saves,
+      the gym takes the code, so Run always plays what you can see. Or press <b>Open a .hex</b>
+      to load a program you have already built.</p>
+    </div>
+    <textarea id="src" spellcheck="false" hidden></textarea>
+  </section>
+
+  <section class="panel roomwrap">
+    <h2>The room <span id="clock" style="float:right;font-family:var(--f-mono);color:var(--muted)">0.0 s</span></h2>
+    <canvas id="room" width="1100" height="1100"></canvas>
+    <div class="tools">
+      <button id="lights" class="on">Room lights: on</button>
+      <button id="torch">Torch: off</button>
+      <span class="sep"></span>
+      <button data-tool="move" class="on">Drag things</button>
+      <button data-tool="pen">Draw line</button>
+      <button data-tool="erase">Erase line</button>
+      <button id="clearLine">Clear floor</button>
+      <span class="sep"></span>
+      <button id="addBox">Add box</button>
+      <button id="furnish">Furnish room</button>
+      <button id="clearBoxes">Empty room</button>
+      <span class="sep"></span>
+      <button id="trailBtn" class="on">Trail</button>
+      <button id="resetBot">Put robot back</button>
+    </div>
+    <p class="hint">Shadow Monster learns how bright the room is when you press Run, then sleeps.
+    Press <b>Run</b>, wait for the sleepy eyes, then switch the <b>torch</b> on &mdash; that is the jump it is waiting for.
+    Drag the torch to chase it into the corners - it runs away from light, it does not follow it.</p>
+  </section>
+
+  <aside class="instr">
+    <div class="panel">
+      <h2>micro:bit</h2>
+      <div class="screen" id="screen"></div>
+      <div class="pixrow" id="pix"></div>
+      <div class="mbtns" style="margin-top:10px">
+        <button data-press="A">A</button>
+        <button data-press="B">B</button>
+        <button data-press="AB">A+B</button>
+        <button data-press="shake">Shake</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>What the robot senses</h2>
+      <table class="read">
+        <tr><td class="k">light sensor left</td><td class="v" id="r-ll">0</td></tr>
+        <tr><td class="k">light sensor right</td><td class="v" id="r-lr">0</td></tr>
+        <tr><td class="k">light level (screen)</td><td class="v" id="r-lv">0</td></tr>
+        <tr><td class="k">line left / right</td><td class="v" id="r-line">0 / 0</td></tr>
+        <tr><td class="k">sonar</td><td class="v" id="r-son">0 cm</td></tr>
+        <tr><td class="k">motors L / R</td><td class="v" id="r-mot">0 / 0</td></tr>
+        <tr><td class="k">speed</td><td class="v" id="r-spd">0 mm/s</td></tr>
+        <tr><td class="k">battery</td><td class="v" id="r-batt">100%</td></tr>
+        <tr><td class="k">drag vs friction</td><td class="v" id="r-forces">0 / 0 N</td></tr>
+      </table>
+      <div class="bar"><i id="b-ll"></i></div>
+      <div class="bar"><i id="b-lr"></i></div>
+    </div>
+
+    <div class="panel">
+      <h2>Robot settings</h2>
+      <div class="sliders">
+        <label>top speed at 100% <b id="v-top">450</b></label>
+        <input type="range" id="s-top" min="150" max="900" step="10" value="450">
+        <label>deadband (won't move below) <b id="v-dead">15</b></label>
+        <input type="range" id="s-dead" min="0" max="40" step="1" value="15">
+        <label>torch strength <b id="v-torch">1200</b></label>
+        <input type="range" id="s-torch" min="200" max="2000" step="50" value="1200">
+        <label>grip, how hard the tyres hold <b id="v-grip">0.70</b></label>
+        <input type="range" id="s-grip" min="0.2" max="1.2" step="0.05" value="0.7">
+        <label>right motor runs faster by <b id="v-mis">3</b>%</label>
+        <input type="range" id="s-mis" min="-10" max="10" step="1" value="3">
+        <label>battery <b id="v-batt">100</b>%</label>
+        <input type="range" id="s-batt" min="10" max="100" step="1" value="100">
+      </div>
+      <div class="tabs" style="margin-top:9px">
+        <button data-floor="lino" class="on">Lino</button>
+        <button data-floor="carpet">Carpet</button>
+        <button data-floor="polished">Polished</button>
+      </div>
+      <label class="inline" style="margin-top:8px"><input type="checkbox" id="air" checked> count air resistance</label>
+      <button id="invert" style="width:100%;margin-top:9px">Light sensors: higher = brighter</button>
+      <p class="hint">Measure your own Bit:Bot once and set these, then the gym stops lying to you.
+      If your robot reads the other way round, press the button above.</p>
+    </div>
+
+    <div class="panel">
+      <h2>What happened</h2>
+      <div id="log"></div>
+    </div>
+  </aside>
+</div>
+
+<footer>
+  A simulation, not a promise. Battery level, wheel slip, the floor and the classroom lights all move the real numbers &mdash; the real Bit:Bot still gets the final word.
+</footer>
+
+<script>
+"use strict";
+
+/* ========================================================================
+   1. The world. Everything is in millimetres; the room is 2 m square.
+   ======================================================================== */
+const ROOM = 2000;
+const FLOOR_N = 500;                 // floor bitmap resolution for the drawn line
+const MM_PER_FLOORPX = ROOM / FLOOR_N;
+
+const BOT = {
+  axle: 110,       // distance between the wheels
+  radius: 62,      // body, treated as a circle for bumping into things
+  senFwd: 55,      // light sensors sit this far forward
+  senSide: 34,     // and this far out to each side
+  senAngle: 0.44,  // each one faces about 25 degrees outwards
+  lineFwd: 42,     // line sensors underneath, near the front
+  lineSide: 18,
+  sonarFwd: 62
+};
+
+const world = {
+  bot: { x: 1000, y: 1500, h: -Math.PI / 2, lm: 0, rm: 0, vl: 0, vr: 0, brake: false },
+  lights: { room: true, torch: false, tx: 1680, ty: 1720, cx: 1000, cy: 1000, H: 2400 },
+  boxes: [],
+  batt: 100,
+  trail: [],
+  showTrail: true,
+  model: "XL",
+  enc: { l: 0, r: 0 },
+  bias: { dir: null, amount: 0 },
+  pixels: new Array(12).fill(null),
+  pixelBright: 40,
+  screen: new Array(25).fill(0)
+};
+
+const cfg = { top: 450, dead: 15, torch: 1200, invert: false };
+
+/* floor bitmap for the black line */
+const floor = document.createElement("canvas");
+floor.width = floor.height = FLOOR_N;
+const fctx = floor.getContext("2d", { willReadFrequently: true });
+let floorData = null;
+function refreshFloor() { floorData = fctx.getImageData(0, 0, FLOOR_N, FLOOR_N).data; }
+refreshFloor();
+
+function isDark(x, y) {
+  if (!floorData) return false;
+  const px = Math.floor(x / MM_PER_FLOORPX), py = Math.floor(y / MM_PER_FLOORPX);
+  if (px < 0 || py < 0 || px >= FLOOR_N || py >= FLOOR_N) return false;
+  return floorData[(py * FLOOR_N + px) * 4 + 3] > 120;
+}
+
+/* ========================================================================
+   2. Physics. A wheel does not jump to its speed: the motor pulls against
+      the robot's inertia, the floor pushes back, and the tyres can only
+      hold so hard before they slip. Everything below is in SI inside the
+      sums and millimetres outside them.
+   ======================================================================== */
+const G = 9.81;
+
+const FLOORS = {
+  lino:     { name: "lino",     mu: 0.70, roll: 0.015, dead: 15 },
+  carpet:   { name: "carpet",   mu: 0.90, roll: 0.045, dead: 24 },
+  polished: { name: "polished", mu: 0.35, roll: 0.010, dead: 12 }
+};
+
+const PHYS = {
+  mass: 0.25,          // kg, chassis + micro:bit + batteries
+  k: 1.4,              // N per m/s of speed error - how hard the motor pulls
+  kBrake: 2.2,         // N per m/s when the motor is shorted out (Brake)
+  dragK: 0.5 * 1.225 * 1.0 * 0.010,   // 1/2 rho Cd A, in N per (m/s)^2
+  tyreGrip: 0.70,
+  roll: 0.015,
+  gearDrag: 0.10,      // a geared motor is its own brake: cut the power and it stops quickly
+  airOn: true,
+  mismatch: 3,         // % the right motor runs faster than the left, as they always do
+  floor: "lino"
+};
+
+// the commanded speed of a wheel, before the world has its say
+function wheelSpeed(percent) {
+  const a = Math.abs(percent);
+  if (a <= cfg.dead) return 0;
+  const batt = 0.6 + 0.4 * world.batt / 100;          // a tired battery is a slower robot
+  const s = cfg.top * batt * (a - cfg.dead) / (100 - cfg.dead);
+  return percent < 0 ? -s : s;
+}
+
+// how fast one wheel's speed is changing, in mm/s^2, and whether it is slipping
+function wheelAccel(v, cmdPct, side) {
+  const vS = v / 1000;
+  let vT = wheelSpeed(cmdPct) / 1000;
+  if (side === "R") vT *= 1 + PHYS.mismatch / 100;     // the two motors are never twins
+  if (world.bias.dir === "L" && side === "L") vT *= 1 - world.bias.amount / 100;
+  if (world.bias.dir === "R" && side === "R") vT *= 1 - world.bias.amount / 100;
+
+  const powered = cmdPct !== 0 && vT !== 0;
+  let F = powered ? PHYS.k * (vT - vS)
+        : world.bot.brake ? -PHYS.kBrake * vS : 0;     // Brake fights the motion, Coast does not
+
+  const moving = Math.abs(vS) > 1e-3;
+  if (moving) {
+    const rollC = PHYS.roll + (powered ? 0 : PHYS.gearDrag);        // the gearbox only fights you when it is not driving
+    F -= Math.sign(vS) * rollC * PHYS.mass * G;                     // the floor and the gears
+    if (PHYS.airOn) F -= Math.sign(vS) * PHYS.dragK * vS * vS;      // the air, for completeness
+  }
+  let a = F / PHYS.mass;
+  const aMax = PHYS.tyreGrip * G;                       // the tyres cannot push harder than they grip
+  let slip = false;
+  if (Math.abs(a) > aMax) { a = Math.sign(a) * aMax; slip = true; }
+  // without this a stopped robot shivers as friction flips sign every step
+  if (!powered && !moving && Math.abs(F) < (PHYS.roll + PHYS.gearDrag) * PHYS.mass * G * 1.01)
+    return { a: -v / (DT / 1000), slip: false };
+  return { a: a * 1000, slip };
+}
+
+let bumped = false, slipping = false;
+
+function physics(dt) {
+  const b = world.bot, h = dt / 1000;
+
+  const L = wheelAccel(b.vl, b.lm, "L");
+  const R = wheelAccel(b.vr, b.rm, "R");
+  slipping = L.slip || R.slip;
+  b.vl += L.a * h;
+  b.vr += R.a * h;
+
+  // the battery goes down while the motors are working
+  world.batt = Math.max(0, world.batt - (Math.abs(b.lm) + Math.abs(b.rm)) / 200 * 0.12 * h);
+
+  world.enc.l += b.vl * h;
+  world.enc.r += b.vr * h;
+
+  const v = (b.vl + b.vr) / 2;
+  const w = (b.vl - b.vr) / BOT.axle;     // canvas y points down, so this is clockwise-positive
+  b.x += v * Math.cos(b.h) * h;
+  b.y += v * Math.sin(b.h) * h;
+  b.h += w * h;
+  shadowsStale = true;                        // the robot moved, so its shadow has too
+
+  bumped = false;
+  const Rr = BOT.radius;
+  if (b.x < Rr) { b.x = Rr; bumped = true; }
+  if (b.y < Rr) { b.y = Rr; bumped = true; }
+  if (b.x > ROOM - Rr) { b.x = ROOM - Rr; bumped = true; }
+  if (b.y > ROOM - Rr) { b.y = ROOM - Rr; bumped = true; }
+
+  for (const bx of world.boxes) {
+    const cx = Math.max(bx.x, Math.min(b.x, bx.x + bx.w));
+    const cy = Math.max(bx.y, Math.min(b.y, bx.y + bx.h));
+    let dx = b.x - cx, dy = b.y - cy;
+    let d = Math.hypot(dx, dy);
+    if (d < Rr) {
+      if (d < 0.001) { dx = 0; dy = -1; d = 1; }
+      b.x = cx + dx / d * Rr; b.y = cy + dy / d * Rr; bumped = true;
+    }
+  }
+  if (bumped) { b.vl *= 0.2; b.vr *= 0.2; }       // running into something costs you your speed
+
+  if (world.showTrail && Math.abs(v) + Math.abs(w) > 0.5) {
+    const last = world.trail[world.trail.length - 1];
+    if (!last || Math.hypot(last.x - b.x, last.y - b.y) > 8) {
+      world.trail.push({ x: b.x, y: b.y });
+      if (world.trail.length > 1200) world.trail.shift();
+    }
+  }
+}
+
+function furnish() {
+  world.boxes = [
+    { x: 120,  y: 240,  w: 230, h: 620, z: 420, name: "bookcase", fill: "#6b4b2e" },
+    { x: 620,  y: 400,  w: 470, h: 330, z: 240, name: "table",    fill: "#8a5a32" },
+    { x: 1560, y: 980,  w: 300, h: 640, z: 300, name: "sofa",     fill: "#3f5a7a" },
+    { x: 1420, y: 180,  w: 420, h: 200, z: 190, name: "toy box",  fill: "#4e6b45" },
+    { x: 430,  y: 1640, w: 260, h: 250, z: 520, name: "plant",    fill: "#2f6b43", round: true }
+  ];
+}
+
+/* ---- light ------------------------------------------------------------
+   Every lamp is a point source: brightness falls with the square of the
+   distance, a surface facing away from it catches less (Lambert's cosine
+   law), and anything solid in between casts a shadow.
+   ---------------------------------------------------------------------- */
+function cornersOf(bx) {
+  return [{ x: bx.x, y: bx.y }, { x: bx.x + bx.w, y: bx.y },
+          { x: bx.x + bx.w, y: bx.y + bx.h }, { x: bx.x, y: bx.y + bx.h }];
+}
+/* How long a shadow is, is just similar triangles: a lamp at height H, an
+   object of height z standing d away, throws its shadow d*z/(H-z) further on.
+   The shadow itself is the whole area the object hides: its own footprint and
+   everything behind it, which is the hull of the corners and their shadows. */
+function hull(pts) {
+  const p = pts.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [], upper = [];
+  for (const q of p) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop(); lower.push(q); }
+  for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop(); upper.push(q); }
+  lower.pop(); upper.pop();
+  return lower.concat(upper);
+}
+function shadowQuad(bx, lamp) {
+  const corners = cornersOf(bx);
+  const z = Math.min(bx.z || 200, lamp.H - 40);
+  const stretch = z / Math.max(1, lamp.H - z);
+  const far = corners.map(c => {
+    const dx = c.x - lamp.x, dy = c.y - lamp.y, d = Math.hypot(dx, dy) || 1;
+    const len = Math.min(d * stretch, 3000);
+    return { x: c.x + dx / d * len, y: c.y + dy / d * len };
+  });
+  return hull(corners.concat(far));
+}
+function pointInPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+/* Worked out once a frame and used twice: the full set is what you see, and
+   the furniture-only set is what the sensors read. The robot is in the first
+   but not the second - its own shadow must not fall on its own eyes. */
+let shadowsStale = true;
+let SHADOWS = { room: [], torch: [] };        // for drawing: furniture and the robot
+let SEEN = { room: [], torch: [] };           // for sensing: furniture alone
+function buildShadows() {
+  const ceil = { x: world.lights.cx, y: world.lights.cy, H: world.lights.H };
+  const torch = { x: world.lights.tx, y: world.lights.ty, H: 110 };
+  const bot = { x: world.bot.x - BOT.radius, y: world.bot.y - BOT.radius,
+                w: BOT.radius * 2, h: BOT.radius * 2, z: 95 };
+  SEEN.room = world.lights.room ? world.boxes.map(bx => shadowQuad(bx, ceil)) : [];
+  SEEN.torch = world.lights.torch ? world.boxes.map(bx => shadowQuad(bx, torch)) : [];
+  SHADOWS.room = world.lights.room ? SEEN.room.concat([shadowQuad(bot, ceil)]) : [];
+  SHADOWS.torch = world.lights.torch ? SEEN.torch.concat([shadowQuad(bot, torch)]) : [];
+}
+function inShadow(x, y, which) {
+  for (const poly of SEEN[which]) if (pointInPoly(x, y, poly)) return true;
+  return false;
+}
+function lampsOn() {
+  const out = [];
+  if (world.lights.torch)
+    out.push({ key: "torch", x: world.lights.tx, y: world.lights.ty, I: cfg.torch / 1000, H: 110 });
+  if (world.lights.room)
+    out.push({ key: "room", x: world.lights.cx, y: world.lights.cy, I: 3.2, H: world.lights.H });
+  return out;
+}
+// illuminance in arbitrary but consistent units; facing is a heading, or null for "pointing at the ceiling"
+function illuminance(x, y, facing) {
+  if (shadowsStale) { buildShadows(); shadowsStale = false; }
+  let e = world.lights.room ? 0.05 : 0.004;          // light bouncing round the room
+  for (const L of lampsOn()) {
+    const dx = L.x - x, dy = L.y - y;
+    const d2 = (dx * dx + dy * dy) / 1e6;            // m^2
+    let aim = 1;
+    if (facing !== null && facing !== undefined) {
+      const d = Math.sqrt(d2) * 1000 || 1;
+      const cos = (Math.cos(facing) * dx + Math.sin(facing) * dy) / d;
+      if (cos <= 0) continue;                        // the lamp is behind this sensor
+      aim = cos;                                     // Lambert
+    }
+    if (inShadow(x, y, L.key)) continue;             // this spot is in that lamp's shadow
+    const h2 = (L.H / 1000) * (L.H / 1000);          // the lamp is up in the air, not on the floor
+    e += L.I * aim / (d2 + h2 + 0.09);               // inverse square, softened close up
+  }
+  return e;
+}
+// a light-dependent resistor saturates: lots more light makes less and less difference
+function ldr(e, full) {
+  const r = e / (e + 0.45);
+  return clamp(Math.round(full * Math.pow(r, 0.85)), 0, full);
+}
+function sensorPoint(fwd, side) {
+  const b = world.bot, c = Math.cos(b.h), s = Math.sin(b.h);
+  return { x: b.x + c * fwd - s * side, y: b.y + s * fwd + c * side };
+}
+function readLightSensor(which) {
+  const side = which === "L" ? -BOT.senSide : BOT.senSide;
+  const p = sensorPoint(BOT.senFwd, side);
+  const facing = world.bot.h + (which === "L" ? -BOT.senAngle : BOT.senAngle);
+  let v = ldr(illuminance(p.x, p.y, facing), 1023) + Math.round(Math.random() * 6 - 3);
+  if (cfg.invert) v = 1023 - v;
+  return clamp(v, 0, 1023);
+}
+function readScreenLight() {
+  const b = world.bot;
+  return ldr(illuminance(b.x, b.y, null), 255);
+}
+function readLineSensor(which) {
+  const side = which === "L" ? -BOT.lineSide : which === "R" ? BOT.lineSide : 0;   // C is the PRO's middle one
+  const p = sensorPoint(BOT.lineFwd, side);
+  return isDark(p.x, p.y) ? 1 : 0;
+}
+/* ---- sonar: a cone, not a laser, and a wall at a slant sends the ping away --- */
+function rayDistance(ox, oy, ang) {
+  const c = Math.cos(ang), s = Math.sin(ang);
+  for (let d = 0; d < 2400; d += 4) {
+    const x = ox + c * d, y = oy + s * d;
+    if (x < 0 || y < 0 || x > ROOM || y > ROOM) {
+      const nx = x < 0 ? 1 : x > ROOM ? -1 : 0, ny = y < 0 ? 1 : y > ROOM ? -1 : 0;
+      return Math.abs(c * nx + s * ny) < 0.5 ? Infinity : d;      // too slanted, the echo goes elsewhere
+    }
+    for (const bx of world.boxes) {
+      if (x > bx.x && x < bx.x + bx.w && y > bx.y && y < bx.y + bx.h) return d;
+    }
+  }
+  return Infinity;
+}
+function readSonar() {
+  const b = world.bot, c = Math.cos(b.h), s = Math.sin(b.h);
+  const ox = b.x + c * BOT.sonarFwd, oy = b.y + s * BOT.sonarFwd;
+  let best = Infinity;
+  for (let i = -3; i <= 3; i++) best = Math.min(best, rayDistance(ox, oy, b.h + i * 0.044));  // a 15 degree cone
+  const cm = Math.round(best / 10);
+  return (!isFinite(cm) || cm > 200) ? 0 : Math.max(2, cm);        // past 2 m the real one returns 0
+}
+
+/* ========================================================================
+   3. The clock the program lives on. Every pause and every timed move waits
+      on simulated time, which is what lets us run at 8x or single-step.
+   ======================================================================== */
+let simTime = 0, running = false, token = 0, timers = [];
+class Stopped extends Error {}
+
+function wait(ms) {
+  const my = token;
+  return new Promise((res, rej) => timers.push({ t: simTime + Math.max(0, ms), res, rej, my }));
+}
+function flushTimers() {
+  if (!timers.length) return;
+  const due = timers.filter(t => t.t <= simTime);
+  if (!due.length) return;
+  timers = timers.filter(t => t.t > simTime);
+  for (const t of due) t.my === token ? t.res() : t.rej(new Stopped());
+}
+function killTimers() { const old = timers; timers = []; for (const t of old) t.rej(new Stopped()); }
+
+/* ========================================================================
+   4. The MakeCode shims. These are the blocks, written out as the robot
+      and the board would really behave.
+   ======================================================================== */
+const log = document.getElementById("log");
+function say(msg, cls) {
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.textContent = (simTime / 1000).toFixed(1).padStart(5) + "  " + msg;
+  log.appendChild(d);
+  while (log.children.length > 300) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+const ICONS = {
+  Heart: "0101011111111110111000100", SmallHeart: "0000001010011100010000000",
+  Asleep: "0000011011000000111000000", Happy: "0000001010000001000101110",
+  Sad: "0000001010000000111010001", Angry: "1000101010000001111110101",
+  Surprised: "0101000000001000101000100", Confused: "0101000000000000101010101",
+  Yes: "0000000001000101010001000", No: "1000101010001000101010001",
+  Skull: "0111010101111110111001110", Ghost: "0111010101111111111110101",
+  Chessboard: "0101010101010101010101010", Square: "1111110001100011000111111",
+  Diamond: "0010001010100010101000100", Target: "0010001110110110111000100",
+  Duck: "0110011100011111111001110", House: "0010001110111111111001110",
+  StickFigure: "0010011111001000101010001", Umbrella: "0111011111001000101001100"
+};
+const UNKNOWN = "1111110001101011000111111";
+
+const screenEls = [];
+(function buildScreen() {
+  const s = document.getElementById("screen");
+  for (let i = 0; i < 25; i++) { const e = document.createElement("span"); s.appendChild(e); screenEls.push(e); }
+  const p = document.getElementById("pix");
+  for (let i = 0; i < 12; i++) { const e = document.createElement("i"); p.appendChild(e); }
+})();
+
+function setScreen(pattern) {
+  for (let i = 0; i < 25; i++) world.screen[i] = pattern[i] === "1" ? 1 : 0;
+}
+function screenFromLeds(text) {
+  const bits = String(text).replace(/[^#.]/g, "").replace(/#/g, "1").replace(/\./g, "0");
+  setScreen(bits.padEnd(25, "0").slice(0, 25));
+}
+/* The 5x5 font. One digit or one letter stands still; anything longer
+   scrolls in from the right, a column at a time, exactly as the board does. */
+const FONT = {
+  "0": "01100 10010 10010 10010 01100", "1": "00100 01100 00100 00100 01110",
+  "2": "11100 00010 01100 10000 11110", "3": "11110 00010 01100 00010 11100",
+  "4": "10000 10100 10100 11110 00100", "5": "11110 10000 11100 00010 11100",
+  "6": "00110 01000 11100 10010 01100", "7": "11110 00010 00100 01000 01000",
+  "8": "01100 10010 01100 10010 01100", "9": "01100 10010 01110 00010 01100",
+  "A": "01100 10010 11110 10010 10010", "B": "11100 10010 11100 10010 11100",
+  "C": "01110 10000 10000 10000 01110", "D": "11100 10010 10010 10010 11100",
+  "E": "11110 10000 11100 10000 11110", "F": "11110 10000 11100 10000 10000",
+  "G": "01110 10000 10110 10010 01110", "H": "10010 10010 11110 10010 10010",
+  "I": "11100 01000 01000 01000 11100", "J": "11110 00010 00010 10010 01100",
+  "K": "10010 10100 11000 10100 10010", "L": "10000 10000 10000 10000 11110",
+  "M": "10001 11011 10101 10001 10001", "N": "10001 11001 10101 10011 10001",
+  "O": "01100 10010 10010 10010 01100", "P": "11100 10010 11100 10000 10000",
+  "Q": "01100 10010 10010 01100 00110", "R": "11100 10010 11100 10100 10010",
+  "S": "01110 10000 01100 00010 11100", "T": "11111 00100 00100 00100 00100",
+  "U": "10010 10010 10010 10010 01100", "V": "10001 10001 10001 01010 00100",
+  "W": "10001 10001 10101 11011 10001", "X": "10010 10010 01100 10010 10010",
+  "Y": "10001 01010 00100 00100 00100", "Z": "11110 00100 01000 10000 11110",
+  " ": "00000 00000 00000 00000 00000", "-": "00000 00000 11110 00000 00000",
+  "+": "00000 00100 01110 00100 00000", ".": "00000 00000 00000 00000 00100",
+  "?": "11100 00010 01100 00000 01000", "!": "01000 01000 01000 00000 01000",
+  ":": "00000 01000 00000 01000 00000", "=": "00000 11110 00000 11110 00000",
+  "%": "10001 00010 00100 01000 10001", "/": "00001 00010 00100 01000 10000",
+  "<": "00010 00100 01000 00100 00010", ">": "01000 00100 00010 00100 01000"
+};
+const GLYPH_UNKNOWN = "11111 10001 10101 10001 11111";
+
+function glyph(ch) { return (FONT[String(ch).toUpperCase()] || GLYPH_UNKNOWN).replace(/ /g, ""); }
+function showGlyph(ch) { setScreen(glyph(ch)); }
+
+// one column of the whole message, as five bits top to bottom
+function messageColumns(text) {
+  const cols = [];
+  const chars = String(text).split("");
+  chars.forEach((ch, n) => {
+    const g = glyph(ch);
+    for (let c = 0; c < 5; c++) {
+      let bits = "";
+      for (let r = 0; r < 5; r++) bits += g[r * 5 + c];
+      cols.push(bits);
+    }
+    if (n < chars.length - 1) cols.push("00000");   // one blank column between letters
+  });
+  return cols;
+}
+
+async function scrollText(text, interval) {
+  const cols = messageColumns(text);
+  const gap = interval || 150;
+  for (let offset = -4; offset <= cols.length; offset++) {
+    const out = new Array(25).fill("0");
+    for (let c = 0; c < 5; c++) {
+      const col = cols[offset + c];
+      if (!col) continue;
+      for (let r = 0; r < 5; r++) out[r * 5 + c] = col[r];
+    }
+    setScreen(out.join(""));
+    await wait(gap);
+  }
+  setScreen("0".repeat(25));
+}
+
+// a single character sits still; a longer one scrolls, which is what the board does
+async function showText(text, interval) {
+  const str = String(text);
+  if (str.length <= 1) { showGlyph(str); await wait((interval || 150) * 4); return; }
+  await scrollText(str, interval);
+}
+
+/* a small, honest beep so sounds are noticeable without being a nuisance */
+let actx = null;
+function beep(kind) {
+  if (!document.getElementById("sound").checked) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+    o.type = "triangle";
+    const f = kind === "low" ? 220 : kind === "high" ? 880 : 440;
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f * (kind === "low" ? 0.6 : 1.8), t + 0.18);
+    g.gain.setValueAtTime(0.09, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.21);
+  } catch (e) { /* no audio, no problem */ }
+}
+
+const handlers = { A: null, B: null, AB: null, shake: null, logo: null };
+
+const ENUMS = {
+  /* ---- the micro:bit side ---- */
+  IconNames: new Proxy({}, { get: (_, k) => String(k) }),
+  Button: { A: "A", B: "B", AB: "AB" },
+  Gesture: { Shake: "shake", LogoUp: "logo", LogoDown: "logodown", ScreenUp: "up", ScreenDown: "down",
+             TiltLeft: "tiltleft", TiltRight: "tiltright", FreeFall: "freefall" },
+  TouchPin: { P0: "P0", P1: "P1", P2: "P2", Logo: "logo" },
+  Note: new Proxy({}, { get: (_, k) => String(k) }),
+  BeatFraction: new Proxy({}, { get: (_, k) => String(k) }),
+  PlaybackMode: { UntilDone: 0, InBackground: 1, LoopingInBackground: 2 },
+  soundExpression: new Proxy({}, { get: (_, k) => String(k) }),
+  DisplayMode: { BlackAndWhite: 0 },
+
+  /* ---- the Bit:Bot side, straight from the 4tronix extension ----
+     Values are names rather than numbers, so whatever order 4tronix chose
+     cannot bite us. The colours are the real numbers, because convertRGB
+     and the colour blocks hand each other plain numbers. */
+  BBModel: { Classic: "Classic", XL: "XL", PRO: "PRO", Auto: "Auto" },
+  BBMotor: { Left: "L", Right: "R", Both: "B" },
+  BBArms: { Both: "B", Left: "L", Right: "R" },
+  BBDirection: { Forward: "FWD", Reverse: "REV" },
+  BBArcDirection: { ForwardLeft: "FL", ForwardRight: "FR", ReverseLeft: "RL", ReverseRight: "RR" },
+  BBRobotDirection: { Left: "L", Right: "R" },
+  BBStopMode: { Coast: "coast", Brake: "brake" },
+  BBLineSensor: { Left: "L", Right: "R" },
+  BBPLineSensor: { Left: "L", Right: "R", Centre: "C" },
+  BBLightSensor: { Left: "L", Right: "R" },
+  BBPulseSensor: { Left: "L", Right: "R" },
+  BBPingUnit: { Centimeters: "cm", Inches: "in", MicroSeconds: "us" },
+  BBSensorUnit: { Millimeters: "mm", Centimeters: "cm", Inches: "in", Pulses: "pulses" },
+  BBServos: { P1: "P1", P2: "P2" },
+  BBMode: { Manual: "manual", Auto: "auto" },
+  BBBuzz: { On: true, Off: false },
+  BBBuzzVolume: { Off: "off", Quiet: "quiet", Medium: "medium", Loud: "loud" },
+  BBBluetooth: { btEnable: true, btDisable: false },
+  LIMode: { Off: "off", On: "on", Auto: "auto" },
+  BBColors: { Red: 0xff0000, Orange: 0xffa500, Yellow: 0xffff00, Green: 0x00ff00, Blue: 0x0000ff,
+              Indigo: 0x4b0082, Violet: 0x8a2be2, Purple: 0xff00ff, White: 0xffffff, Black: 0x000000 },
+  BBirKeys: new Proxy({}, { get: (_, k) => String(k) }),
+  BBirNoAny: new Proxy({}, { get: (_, k) => String(k) }),
+  eyePos: new Proxy({}, { get: (_, k) => String(k) }),
+  eyeSize: new Proxy({}, { get: (_, k) => String(k) }),
+  bfEyes: new Proxy({}, { get: (_, k) => String(k) }),
+  bfMouth: new Proxy({}, { get: (_, k) => String(k) })
+};
+
+/* said once per run, so a note does not drown the log */
+let noted = new Set();
+function once(key, msg, cls) { if (!noted.has(key)) { noted.add(key); say(msg, cls || "say"); } }
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+function cssOf(rgb) {
+  if (typeof rgb === "string") return rgb;
+  const n = clamp(Math.round(rgb || 0), 0, 0xffffff);
+  return "#" + n.toString(16).padStart(6, "0");
+}
+function proOnly(name) {
+  if (world.model === "PRO") return false;
+  once("pro:" + name, "note: " + name + " only does anything on a Bit:Bot PRO - your " + world.model + " ignores it");
+  return true;
+}
+
+function makeApi() {
+  const basic = {
+    showIcon: (name) => { setScreen(ICONS[name] || UNKNOWN); say("show icon " + name); },
+    showLeds: (s) => { screenFromLeds(s); say("show leds"); },
+    showNumber: async (n, interval) => {
+      const str = String(Math.round(n * 1000) / 1000);
+      say("show number " + str + (str.length > 1 ? "  (it has to scroll)" : ""));
+      await showText(str, interval);
+    },
+    showString: async (t, interval) => {
+      const str = String(t);
+      say("show \"" + str + "\"" + (str.length > 1 ? "  (it has to scroll)" : ""));
+      await showText(str, interval);
+    },
+    clearScreen: () => setScreen("0".repeat(25)),
+    pause: async (ms) => { await wait(ms); },
+    forever: (cb) => foreverQueue.push(cb)
+  };
+  const input = {
+    lightLevel: () => readScreenLight(),
+    temperature: () => 21,
+    buttonIsPressed: () => false,
+    onButtonPressed: (b, cb) => { handlers[b] = cb; },
+    onGesture: (g, cb) => { handlers[g] = cb; },
+    onLogoEvent: (e, cb) => { handlers.logo = cb; },
+    acceleration: () => 0,
+    compassHeading: () => Math.round(((world.bot.h * 180 / Math.PI) + 450) % 360),
+    runningTime: () => Math.round(simTime)
+  };
+  const led = {
+    plot: (x, y) => { world.screen[y * 5 + x] = 1; },
+    unplot: (x, y) => { world.screen[y * 5 + x] = 0; },
+    toggle: (x, y) => { world.screen[y * 5 + x] ^= 1; },
+    plotBarGraph: (value, high) => {
+      const h = high || 1;
+      const rows = Math.max(0, Math.min(5, Math.round(value / h * 5)));
+      const out = new Array(25).fill("0");
+      for (let r = 0; r < rows; r++) for (let c = 0; c < 5; c++) out[(4 - r) * 5 + c] = "1";
+      setScreen(out.join("")); say("bar graph " + value + " of " + h);
+    }
+  };
+  const music = {
+    play: async (what, mode) => { say("sound: " + what); beep("mid"); await wait(mode === 1 ? 0 : 500); },
+    playTone: async (f, ms) => { beep(f > 500 ? "high" : "low"); await wait(ms); },
+    ringTone: (f) => beep(f > 500 ? "high" : "low"),
+    rest: async (ms) => { await wait(ms); },
+    builtinPlayableSoundEffect: (s) => String(s),
+    tonePlayable: (n, b) => String(n),
+    beat: (b) => 250,
+    setVolume: () => {}
+  };
+  const radio = {
+    setGroup: (g) => say("radio group " + g),
+    sendNumber: (n) => say("radio sent number " + n),
+    sendString: (s) => say("radio sent \"" + s + "\""),
+    sendValue: (k, v) => say("radio sent " + k + "=" + v),
+    onReceivedNumber: () => say("note: radio receiving is not simulated yet"),
+    onReceivedString: () => say("note: radio receiving is not simulated yet"),
+    receivedPacket: () => -60,
+    setTransmitPower: () => {}
+  };
+  /* ====================================================================
+     Every block in the 4tronix Bit:Bot extension (v2.1.9), behaving the
+     way the real one does - including refusing to work when the block
+     belongs to a model you have not got.
+     ==================================================================== */
+  const sign = d => (d === "REV" ? -1 : 1);
+  const armRange = arm => arm === "L" ? [0, 6] : arm === "R" ? [6, 12] : [0, 12];
+  const stopWheel = m => { if (m === "L") world.bot.lm = 0; else if (m === "R") world.bot.rm = 0;
+                           else { world.bot.lm = 0; world.bot.rm = 0; } };
+  const setWheels = (l, r) => { world.bot.lm = l; world.bot.rm = r; };
+  const addon = (group, name) =>
+    once("addon:" + group, "note: " + name + " needs the " + group + " add-on, which the gym has not got");
+
+  const bitbot = {
+
+    /* ---------------- which robot ---------------- */
+    select_model: (m) => { world.model = (m === "Auto" ? "XL" : m); say("Bit:Bot model: " + world.model); },
+    getModel: () => world.model,
+    BBModels: (m) => m,
+    getVersionCode: () => world.model === "PRO" ? 16 : world.model === "XL" ? 9 : 0,
+    getFirmwareCode: () => proOnly("getFirmwareCode") ? 0 : 11,
+    bbEnableBluetooth: () => { },
+
+    /* ---------------- driving, the 0 to 100 blocks ---------------- */
+    go: (dir, speed) => {
+      world.bot.brake = false;
+      const s = sign(dir) * clamp(speed, -100, 100);
+      setWheels(s, s);
+      say((sign(dir) < 0 ? "reverse" : "forward") + " at " + speed + "%" +
+          (wheelSpeed(speed) === 0 ? "  (too slow to move)" : ""));
+    },
+    goms: async (dir, speed, ms) => { bitbot.go(dir, speed); await wait(ms); bitbot.stop("brake"); },
+    rotate: (dir, speed) => {
+      world.bot.brake = false;
+      const s = clamp(speed, 0, 100);
+      setWheels(dir === "R" ? s : -s, dir === "R" ? -s : s);
+      say("turn " + (dir === "R" ? "right" : "left") + " at " + speed + "%");
+    },
+    rotatems: async (dir, speed, ms) => { bitbot.rotate(dir, speed); await wait(ms); bitbot.stop("brake"); },
+    stop: (mode) => {
+      stopWheel("B");
+      world.bot.brake = (mode !== "coast");
+      if (mode === "coast") once("coast", "note: coasting - the robot rolls on until friction stops it");
+    },
+    move: (motor, dir, speed) => {
+      world.bot.brake = false;
+      const s = sign(dir) * clamp(speed, -100, 100);
+      if (motor === "L") world.bot.lm = s; else if (motor === "R") world.bot.rm = s; else setWheels(s, s);
+      say((motor === "L" ? "left motor " : motor === "R" ? "right motor " : "both motors ") +
+          (sign(dir) < 0 ? "reverse" : "forward") + " at " + speed + "%" +
+          (wheelSpeed(speed) === 0 ? "  (too slow to move)" : ""));
+    },
+    movems: async (motor, dir, speed, ms) => { bitbot.move(motor, dir, speed); await wait(ms); stopWheel(motor); },
+    BBBias: (dir, bias) => {
+      world.bias = { dir: dir, amount: clamp(bias, 0, 80) };
+      say("bias " + clamp(bias, 0, 80) + "% to the " + (dir === "R" ? "right" : "left"));
+    },
+
+    /* ---------------- driving, the old 0 to 1023 blocks ---------------- */
+    motor: (m, speed) => {
+      const pct = clamp(speed, -1023, 1023) / 1023 * 100;
+      if (m === "L") world.bot.lm = pct; else if (m === "R") world.bot.rm = pct; else setWheels(pct, pct);
+      once("scale1023", "note: motor, drive and driveTurn run on 0 to 1023, not 0 to 100");
+      say("motor " + (m === "L" ? "left" : m === "R" ? "right" : "both") + " at " + speed + " of 1023");
+    },
+    drive: (speed) => bitbot.motor("B", speed),
+    driveMilliseconds: async (speed, ms) => { bitbot.motor("B", speed); await wait(ms); stopWheel("B"); },
+    driveTurn: (dir, speed) => {
+      const s = Math.max(0, speed);
+      bitbot.motor("L", dir === "L" ? -s : s);
+      bitbot.motor("R", dir === "L" ? s : -s);
+    },
+    driveTurnMilliseconds: async (dir, speed, ms) => { bitbot.driveTurn(dir, speed); await wait(ms); stopWheel("B"); },
+
+    /* ---------------- driving by distance and angle: PRO only ---------------- */
+    gocm: async (dir, speed, distance) => {
+      if (proOnly("gocm")) return;
+      const v = wheelSpeed(clamp(speed, 0, 100));
+      bitbot.go(dir, speed);
+      if (v > 0) await wait(Math.abs(distance) * 10 / v * 1000);
+      bitbot.stop("brake");
+    },
+    spinDeg: async (dir, speed, angle) => {
+      if (proOnly("spinDeg")) return;
+      const v = wheelSpeed(clamp(speed, 0, 100));
+      bitbot.rotate(dir, speed);
+      if (v > 0) await wait(Math.abs(angle) * Math.PI / 180 / (2 * v / BOT.axle) * 1000);
+      bitbot.stop("brake");
+    },
+    arc: (dir, speed, radius) => {
+      if (proOnly("arc")) return;
+      const R = Math.max(radius, 7) * 10;                      // the extension floors the radius at 7 cm
+      const back = (dir === "RL" || dir === "RR") ? -1 : 1;
+      const inner = speed * (R - BOT.axle / 2) / (R + BOT.axle / 2);
+      const left = (dir === "FL" || dir === "RL") ? inner : speed;
+      const right = (dir === "FL" || dir === "RL") ? speed : inner;
+      setWheels(back * left, back * right);
+      say("arc " + dir + " at " + speed + "%, radius " + Math.max(radius, 7) + " cm");
+    },
+    arcdeg: async (dir, speed, radius, angle) => {
+      if (proOnly("arcdeg")) return;
+      bitbot.arc(dir, speed, radius);
+      const R = Math.max(radius, 7) * 10, v = wheelSpeed(speed);
+      if (v > 0) await wait(Math.abs(angle) * Math.PI / 180 * R / v * 1000);
+      bitbot.stop("brake");
+    },
+    steer: (direction, speed) => {
+      if (proOnly("steer")) return;
+      const d = clamp(direction, -100, 100), sp = clamp(speed, 0, 100);
+      setWheels(d > 0 ? sp : (100 + d) * sp / 100, d < 0 ? sp : (100 - d) * sp / 100);
+      say("steer " + d + " at " + sp + "%");
+    },
+
+    /* ---------------- wheel encoders: PRO only ---------------- */
+    enablePID: (on) => { if (!proOnly("enablePID")) say("PID " + (on ? "on" : "off")); },
+    wheelSensor: (sensor, unit) => {
+      if (proOnly("wheelSensor")) return 0;
+      const mm = Math.abs(sensor === "L" ? world.enc.l : world.enc.r);
+      if (unit === "mm") return Math.round(mm);
+      if (unit === "cm") return Math.round(mm / 10);
+      if (unit === "in") return Math.round(mm / 25.4);
+      return Math.round(mm * 10.36);
+    },
+    turnAngle: () => proOnly("turnAngle") ? 0
+      : Math.round((world.enc.l - world.enc.r) / BOT.axle * 180 / Math.PI),
+    resetWheelSensors: (m) => {
+      if (m === "L") world.enc.l = 0; else if (m === "R") world.enc.r = 0; else { world.enc.l = 0; world.enc.r = 0; }
+    },
+    lastEncoderError: () => proOnly("lastEncoderError") ? 0 : 0,
+    motorTrim: () => proOnly("motorTrim"),
+    pidConstants: () => proOnly("pidConstants"),
+    carryForwardErrors: () => proOnly("carryForwardErrors"),
+    clearPidErrors: () => proOnly("clearPidErrors"),
+    stopThreshold: () => proOnly("stopThreshold"),
+    setStartPWM: () => proOnly("setStartPWM"),
+
+    /* ---------------- the line sensors ---------------- */
+    readLine: (sensor) => readLineSensor(sensor),
+    readLineDigital: (sensor) => {
+      // the real extension returns false on anything that is not a PRO
+      if (world.model !== "PRO") {
+        once("rld", "note: read line digital always says false unless you have a PRO - use \"read line sensor\" on an XL", "err");
+        return false;
+      }
+      return readLineSensor(sensor) === 1;
+    },
+    readLineAnalog: (sensor) => {
+      if (proOnly("readLineAnalog")) return 0;
+      return readLineSensor(sensor) ? 120 + Math.round(Math.random() * 60) : 820 + Math.round(Math.random() * 60);
+    },
+    mergeLinePosition: () => {
+      if (proOnly("mergeLinePosition")) return 0;
+      const l = readLineSensor("L"), r = readLineSensor("R"), c = readLineSensor("C");
+      if (!l && !r && !c) return 0;
+      return Math.round(((r * 100 + c * 50) - (l * 100 + c * 50)) / Math.max(1, l + r + c));
+    },
+    setThreshold: () => proOnly("setThreshold"),
+    calibrateLine: () => proOnly("calibrateLine"),
+
+    /* ---------------- the other sensors ---------------- */
+    readLight: (sensor) => readLightSensor(sensor),
+    sonar: (unit) => {
+      const cm = readSonar();
+      if (cm === 0) once("sonar0", "note: nothing within 2 m, so sonar gives 0 - watch out for \"if sonar < 15\"");
+      if (unit === "in") return Math.round(cm / 2.54);
+      if (unit === "us") return Math.round(cm * 59);
+      return cm;
+    },
+    batteryVoltage: () => proOnly("batteryVoltage") ? 0 : Math.round((4.85 + Math.random() * 0.2) * 100) / 100,
+
+    /* ---------------- the lights along each arm ---------------- */
+    setLedColor: (rgb) => { world.pixels.fill(cssOf(rgb)); say("lights " + nameOfColour(rgb)); },
+    setPixelColor: (id, rgb) => { world.pixels[((id % 12) + 12) % 12] = cssOf(rgb); },
+    ledClear: () => world.pixels.fill(null),
+    ledBrightness: (b) => { world.pixelBright = clamp(b, 0, 255); },
+    ledRainbow: (dir, arm) => {
+      const [a, b] = armRange(arm);
+      for (let i = a; i < b; i++) world.pixels[i] = "hsl(" + Math.round((i - a) * 300 / (b - a - 1 || 1)) + ",95%,55%)";
+      say("rainbow");
+    },
+    ledShift: (dir, arm) => {
+      const [a, b] = armRange(arm), slice = world.pixels.slice(a, b);
+      if (dir) { slice.pop(); slice.unshift(null); } else { slice.shift(); slice.push(null); }
+      for (let i = a; i < b; i++) world.pixels[i] = slice[i - a];
+    },
+    ledRotate: (dir, arm) => {
+      const [a, b] = armRange(arm), slice = world.pixels.slice(a, b);
+      if (dir) slice.unshift(slice.pop()); else slice.push(slice.shift());
+      for (let i = a; i < b; i++) world.pixels[i] = slice[i - a];
+    },
+    setUpdateMode: () => { },
+    ledShow: () => { },
+    BBColours: (c) => c,
+    convertRGB: (r, g, b) => (clamp(r, 0, 255) << 16) + (clamp(g, 0, 255) << 8) + clamp(b, 0, 255),
+
+    /* ---------------- the buzzer ---------------- */
+    buzz: (flag) => { if (flag) beep("high"); },
+    buzzTime: async (ms) => { beep("high"); await wait(ms); },
+    setVolume: (v) => { if (!proOnly("setVolume")) say("buzzer volume " + v); },
+
+    /* ---------------- things the gym has not got bolted on ---------------- */
+    setTalon: () => addon("servo", "the talon"),
+    bbSetServo: () => addon("servo", "set servo"),
+    bb360Servo: () => addon("servo", "the 360 servo"),
+    bbServoDeadband: () => addon("servo", "servo deadband"),
+    bbServoTrim: () => addon("servo", "servo trim"),
+    bbStopServos: () => addon("servo", "stop servos"),
+
+    onIREvent: () => { if (!proOnly("onIREvent")) addon("infra-red", "the IR remote"); },
+    irKey: () => { proOnly("irKey"); return false; },
+    lastIRCode: () => { proOnly("lastIRCode"); return 0; },
+    irKeyCode: () => 0,
+    onIREventAddon: () => addon("infra-red", "the IR remote"),
+    irKeyAddon: () => { addon("infra-red", "the IR remote"); return false; },
+    lastIRCodeAddon: () => { addon("infra-red", "the IR remote"); return 0; },
+    irKeyCodeAddon: () => 0,
+
+    matClear: () => addon("matrix", "the 5x5 matrix"), setMatrix: () => addon("matrix", "the 5x5 matrix"),
+    setPixel: () => addon("matrix", "the 5x5 matrix"), setArrayPixel: () => addon("matrix", "the 5x5 matrix"),
+    matRainbow: () => addon("matrix", "the 5x5 matrix"), matRectangle: () => addon("matrix", "the 5x5 matrix"),
+    matShowEyeball: () => addon("matrix", "the 5x5 matrix"), matShowImage: () => addon("matrix", "the 5x5 matrix"),
+    matShow: () => addon("matrix", "the 5x5 matrix"), matBrightness: () => addon("matrix", "the 5x5 matrix"),
+
+    setBitface: () => addon("bitface", "the BitFace"), setBitEye: () => addon("bitface", "the BitFace"),
+    setBitNose: () => addon("bitface", "the BitFace"), setBitMouth: () => addon("bitface", "the BitFace"),
+    bitBrightness: () => addon("bitface", "the BitFace"),
+
+    oledText: () => addon("OLED", "the screen"), oledNumber: () => addon("OLED", "the screen"),
+    oledUpdate: () => addon("OLED", "the screen"), oledSet: () => addon("OLED", "the screen"),
+    oledInvert: () => addon("OLED", "the screen"), oledZOOM: () => addon("OLED", "the screen"),
+    oledPlotPixel: () => addon("OLED", "the screen"), oledLine: () => addon("OLED", "the screen"),
+    oledRectangle: () => addon("OLED", "the screen"),
+
+    /* ---------------- the memory on the board ---------------- */
+    writeEEROM: () => once("eerom", "note: the gym has no EEROM to remember things in"),
+    wrEEROM: () => once("eerom", "note: the gym has no EEROM to remember things in"),
+    readEEROM: () => { once("eerom", "note: the gym has no EEROM to remember things in"); return 0; },
+    rdEEROM: () => { once("eerom", "note: the gym has no EEROM to remember things in"); return 0; },
+    loadCalibration: () => { }, saveCalibration: () => { },
+    checkCalibration: () => 0
+  };
+  const control = { waitMicros: async (us) => { await wait(us / 1000); }, inBackground: (cb) => foreverQueue.push(cb) };
+  const pins = { analogReadPin: () => 0, digitalReadPin: () => 0, analogWritePin: () => {}, digitalWritePin: () => {} };
+  const randint = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+
+  // anything the gym has not been taught yet reports itself instead of crashing
+  const forgiving = (name, obj) => new Proxy(obj, {
+    get(t, k) {
+      if (k in t || typeof k !== "string") return t[k];
+      return function () { say("note: " + name + "." + k + " is not simulated yet", "say"); return 0; };
+    }
+  });
+  return {
+    basic: forgiving("basic", basic), input: forgiving("input", input),
+    led: forgiving("led", led), music: forgiving("music", music),
+    radio: forgiving("radio", radio), bitbot: forgiving("bitbot", bitbot),
+    control: forgiving("control", control), pins: forgiving("pins", pins), randint
+  };
+}
+function nameOfColour(c) {
+  for (const k in ENUMS.BBColors) if (ENUMS.BBColors[k] === c) return k.toLowerCase();
+  return typeof c === "number" ? "#" + c.toString(16).padStart(6, "0") : "on";
+}
+
+/* ========================================================================
+   5. Turning what MakeCode shows you into something we can run. The only
+      real trick: every pause has to be awaited, so we mark the blocking
+      calls and make every function async.
+   ======================================================================== */
+const BLOCKING = ["basic\\.pause", "basic\\.showString", "basic\\.showNumber",
+                  "bitbot\\.\\w*ms", "bitbot\\.\\w*Milliseconds", "bitbot\\.gocm",
+                  "bitbot\\.spinDeg", "bitbot\\.arcdeg", "bitbot\\.buzzTime",
+                  "music\\.play", "music\\.playTone",
+                  "music\\.rest", "control\\.waitMicros"];
+
+function prepare(src) {
+  let s = String(src);
+  s = s.replace(/:\s*(number|string|boolean|void|any)\b/g, "");          // drop type annotations
+  const userFns = [...s.matchAll(/function\s+([A-Za-z_$][\w$]*)\s*\(/g)].map(m => m[1]);
+  const names = BLOCKING.concat(userFns.map(n => n.replace(/[$]/g, "\\$")));
+  const re = new RegExp("(^|[^\\w.$])((?:" + names.join("|") + ")\\s*\\()", "g");
+  s = s.replace(re, "$1await $2");
+  s = s.replace(/\bfunction\s*\(/g, "async function (");
+  s = s.replace(/\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/g, "async function $1(");
+  s = s.replace(/\(\s*\)\s*=>/g, "async () =>");
+  s = s.replace(/async\s+async/g, "async");
+  return s;
+}
+
+let foreverQueue = [];
+
+async function runProgram() {
+  stopProgram(true);
+  token++;
+  const my = token;
+  running = true;
+  foreverQueue = [];
+  noted = new Set();
+  world.enc.l = world.enc.r = 0;
+  world.bias = { dir: null, amount: 0 };
+  log.innerHTML = "";
+  setScreen("0".repeat(25));
+  world.pixels.fill(null);
+  world.bot.lm = world.bot.rm = 0;
+  world.bot.vl = world.bot.vr = 0;
+  world.bot.brake = false;
+  world.batt = +el("s-batt").value;
+  world.trail.length = 0;
+  simTime = 0;
+
+  if (!el("src").value.trim()) {
+    say("nothing to run yet - build some blocks on the left, or open a .hex", "err");
+    running = false; return;
+  }
+  const api = makeApi();
+  let body;
+  try {
+    body = prepare(document.getElementById("src").value);
+  } catch (e) { say("could not read the program: " + e.message, "err"); return; }
+
+  // e.g. a BBxxx enum from a newer extension: let it answer with the member name
+  const seen = new Set([...body.matchAll(/\b([A-Z][A-Za-z0-9_]*)\s*\./g)].map(m => m[1]));
+  const stubs = {}, stubNames = [];
+  for (const n of seen) {
+    if (n in ENUMS || n in window || n === "Math") continue;
+    stubs[n] = new Proxy({}, { get: (_, k) => String(k) });
+    stubNames.push(n);
+    say("note: " + n + " is not one the gym knows, using its names as they are", "say");
+  }
+  const stubLine = stubNames.length ? "const {" + stubNames.join(",") + "} = __st;\n" : "";
+
+  let fn;
+  try {
+    fn = new Function("__ns", "__en", "__st", '"use strict";\n' +
+      "const {basic,input,led,music,radio,bitbot,control,pins,randint} = __ns;\n" +
+      "const {" + Object.keys(ENUMS).join(",") + "} = __en;\n" +   // every enum the gym knows, no hand-kept list
+      "music.PlaybackMode = __en.PlaybackMode;\n" +
+      stubLine +
+      "const Math = Object.assign(Object.create(window.Math), {randomRange:(a,b)=>Math_randomRange(a,b)});\n" +
+      "function Math_randomRange(a,b){return Math.floor(window.Math.random()*(b-a+1))+a;}\n" +
+      "return (async () => {\n" + body + "\n})();");
+  } catch (e) {
+    say("that program has a syntax error: " + e.message, "err");
+    running = false; return;
+  }
+
+  loop();
+  say("run", "say");
+  try {
+    await fn(api, ENUMS, stubs);
+  } catch (e) {
+    if (!(e instanceof Stopped)) { say(e.message, "err"); }
+    return;
+  }
+  if (my !== token) return;
+  for (const cb of foreverQueue) {
+    (async () => {
+      while (my === token) { await cb(); await wait(20); }
+    })().catch(e => { if (!(e instanceof Stopped)) say(e.message, "err"); });
+  }
+  if (!foreverQueue.length) say("program finished", "say");
+}
+
+function stopProgram(quiet) {
+  running = false; token++; killTimers(); foreverQueue = [];
+  world.bot.lm = world.bot.rm = 0;
+  if (!quiet) say("stopped", "say");
+}
+
+/* ========================================================================
+   6. The loop. One frame is a handful of 5 ms steps, and we yield between
+      them so the program's next line really does run at the right moment.
+   ======================================================================== */
+const DT = 5;
+// animation frames stop in a tab nobody is looking at, so keep a timer behind them:
+// the gym carries on in the background instead of freezing mid-program
+function nextFrame() {
+  return new Promise(res => {
+    let done = false;
+    const fire = () => { if (!done) { done = true; res(); } };
+    requestAnimationFrame(fire);
+    setTimeout(fire, 50);
+  });
+}
+async function loop() {
+  while (running) {
+    const steps = Math.max(1, Math.round(16.7 * Number(document.getElementById("speed").value) / DT));
+    for (let i = 0; i < steps; i++) {
+      physics(DT); simTime += DT; flushTimers();
+      await Promise.resolve();
+    }
+    draw(); instruments();
+    await nextFrame();
+  }
+  draw(); instruments();
+}
+async function stepOnce() {
+  const n = Math.round(100 / DT);
+  for (let i = 0; i < n; i++) { physics(DT); simTime += DT; flushTimers(); await Promise.resolve(); }
+  draw(); instruments();
+}
+
+/* ========================================================================
+   7. Drawing
+   ======================================================================== */
+const cv = document.getElementById("room"), ctx = cv.getContext("2d");
+const S = cv.width / ROOM;
+
+function draw() {
+  buildShadows(); shadowsStale = false;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+
+  // the floor, with only the light that bounces around the room
+  ctx.fillStyle = world.lights.room ? "#20242e" : "#111319";
+  ctx.fillRect(0, 0, cv.width, cv.height);
+
+  // the lamp on the ceiling: brightest right underneath, fading outwards
+  if (world.lights.room) {
+    const g = ctx.createRadialGradient(world.lights.cx * S, world.lights.cy * S, 10,
+                                       world.lights.cx * S, world.lights.cy * S, 1500 * S);
+    g.addColorStop(0, "rgba(255,243,214,0.40)");
+    g.addColorStop(0.5, "rgba(255,238,200,0.17)");
+    g.addColorStop(1, "rgba(255,235,190,0.02)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height);
+  }
+
+  // the torch: a tight pool, because it is down on the floor
+  if (world.lights.torch) {
+    const g = ctx.createRadialGradient(world.lights.tx * S, world.lights.ty * S, 4,
+                                       world.lights.tx * S, world.lights.ty * S, 760 * S);
+    g.addColorStop(0, "rgba(255,230,150,0.62)");
+    g.addColorStop(0.4, "rgba(255,210,120,0.20)");
+    g.addColorStop(1, "rgba(255,200,100,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height);
+  }
+
+  // the line drawn on the floor, before the shadows fall across it
+  ctx.drawImage(floor, 0, 0, cv.width, cv.height);
+
+  // the shadows themselves - the same ones the light sensors are reading
+  const paint = (polys, alpha) => {
+    ctx.fillStyle = "rgba(10,11,16," + alpha + ")";
+    for (const poly of polys) {
+      ctx.beginPath();
+      ctx.moveTo(poly[0].x * S, poly[0].y * S);
+      for (const pt of poly.slice(1)) ctx.lineTo(pt.x * S, pt.y * S);
+      ctx.closePath(); ctx.fill();
+    }
+  };
+  paint(SHADOWS.room, 0.26);
+  paint(SHADOWS.torch, 0.42);
+
+  // the furniture
+  for (const b of world.boxes) {
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 9 * S; ctx.shadowOffsetY = 2 * S;
+    ctx.fillStyle = b.fill || "#3d4657";
+    if (b.round) {
+      ctx.beginPath();
+      ctx.ellipse((b.x + b.w / 2) * S, (b.y + b.h / 2) * S, b.w / 2 * S, b.h / 2 * S, 0, 0, 7);
+      ctx.fill();
+    } else {
+      roundRect(b.x * S, b.y * S, b.w * S, b.h * S, 6 * S); ctx.fill();
+    }
+    ctx.restore();
+    ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.lineWidth = 1.5;
+    if (!b.round) { roundRect(b.x * S, b.y * S, b.w * S, b.h * S, 6 * S); ctx.stroke(); }
+    if (b.name && b.w * S > 60) {
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      ctx.font = Math.round(11 * (cv.width / 1100)) + "px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(b.name, (b.x + b.w / 2) * S, (b.y + b.h / 2) * S + 4);
+      ctx.textAlign = "left";
+    }
+  }
+
+  // where the robot has been
+  if (world.showTrail && world.trail.length > 1) {
+    ctx.strokeStyle = "rgba(91,192,235,0.55)"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(world.trail[0].x * S, world.trail[0].y * S);
+    for (const pt of world.trail) ctx.lineTo(pt.x * S, pt.y * S);
+    ctx.stroke();
+  }
+
+  // the ceiling lamp, seen from below
+  if (world.lights.room) {
+    ctx.beginPath(); ctx.arc(world.lights.cx * S, world.lights.cy * S, 22 * S, 0, 7);
+    ctx.fillStyle = "rgba(255,246,214,0.22)"; ctx.fill();
+    ctx.beginPath(); ctx.arc(world.lights.cx * S, world.lights.cy * S, 9 * S, 0, 7);
+    ctx.fillStyle = "#fff3cf"; ctx.fill();
+  }
+
+  // the torch, dim but still there when it is switched off
+  ctx.beginPath(); ctx.arc(world.lights.tx * S, world.lights.ty * S, 15 * S, 0, 7);
+  ctx.fillStyle = world.lights.torch ? "#ffd76a" : "#4a4738";
+  ctx.fill();
+  ctx.strokeStyle = world.lights.torch ? "#6b5a2a" : "#5a5a4a"; ctx.lineWidth = 2; ctx.stroke();
+
+  drawBot();
+
+  // the walls
+  ctx.strokeStyle = "#49536a"; ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, cv.width - 6, cv.height - 6);
+
+  if (slipping) {
+    ctx.fillStyle = "rgba(242,177,52,0.9)";
+    ctx.font = "bold " + Math.round(15 * (cv.width / 1100)) + "px system-ui, sans-serif";
+    ctx.fillText("wheels slipping", 14, 24);
+  }
+}
+
+function drawBot() {
+  const b = world.bot;
+  ctx.save();
+  ctx.translate(b.x * S, b.y * S);
+  ctx.rotate(b.h);
+
+  const L = 120 * S, W = 125 * S;
+  // wheels
+  ctx.fillStyle = "#15181f";
+  ctx.fillRect(-L * 0.18, -W / 2 - 4 * S, L * 0.42, 14 * S);
+  ctx.fillRect(-L * 0.18, W / 2 - 10 * S, L * 0.42, 14 * S);
+
+  // body
+  ctx.fillStyle = "#c8ced9"; ctx.strokeStyle = "#8d96a6"; ctx.lineWidth = 2;
+  roundRect(-L / 2, -W / 2, L, W, 9 * S); ctx.fill(); ctx.stroke();
+
+  // neopixels, six down each side
+  for (let i = 0; i < 12; i++) {
+    const side = i < 6 ? -1 : 1;
+    const k = i % 6;
+    const px = -L / 2 + 12 * S + k * (L - 26 * S) / 5;
+    const py = side * (W / 2 - 9 * S);
+    ctx.beginPath(); ctx.arc(px, py, 4.2 * S, 0, 7);
+    const c = world.pixels[i];
+    if (c && c !== "#000000") {
+      ctx.fillStyle = c; ctx.globalAlpha = Math.max(0.25, world.pixelBright / 255); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.shadowColor = c; ctx.shadowBlur = 10; ctx.fill(); ctx.shadowBlur = 0;
+    } else { ctx.fillStyle = "#8d96a6"; ctx.fill(); }
+  }
+
+  // the micro:bit riding on top
+  ctx.fillStyle = "#1f6f4a"; roundRect(-L * 0.17, -W * 0.22, L * 0.34, W * 0.44, 3 * S); ctx.fill();
+  // the top row of the icon faces the way the robot is going
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+    ctx.fillStyle = world.screen[r * 5 + c] ? "#ff3b3b" : "#2b2f38";
+    ctx.fillRect(L * 0.08 - r * L * 0.05, -W * 0.15 + c * W * 0.06, L * 0.032, W * 0.04);
+  }
+
+  // which way is forward, and where the light sensors look
+  ctx.beginPath(); ctx.moveTo(L / 2, 0); ctx.lineTo(L / 2 - 9 * S, -7 * S); ctx.lineTo(L / 2 - 9 * S, 7 * S);
+  ctx.closePath(); ctx.fillStyle = "#e8575a"; ctx.fill();
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.arc(BOT.senFwd * S, side * BOT.senSide * S, 3.4 * S, 0, 7);
+    ctx.fillStyle = "#ffe08a"; ctx.fill();
+  }
+  ctx.restore();
+}
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+/* ========================================================================
+   8. Instruments
+   ======================================================================== */
+const el = id => document.getElementById(id);
+function instruments() {
+  for (let i = 0; i < 25; i++) screenEls[i].classList.toggle("on", !!world.screen[i]);
+  const pix = el("pix").children;
+  for (let i = 0; i < 12; i++) {
+    const c = world.pixels[i];
+    pix[i].style.background = c && c !== "#000000" ? c : "#2a2f3c";
+    pix[i].style.boxShadow = c && c !== "#000000" ? "0 0 7px " + c : "none";
+  }
+  const ll = readLightSensor("L"), lr = readLightSensor("R");
+  el("r-ll").textContent = ll; el("r-lr").textContent = lr;
+  el("b-ll").style.width = (ll / 1023 * 100) + "%";
+  el("b-lr").style.width = (lr / 1023 * 100) + "%";
+  el("r-lv").textContent = readScreenLight();
+  el("r-line").textContent = readLineSensor("L") + " / " + readLineSensor("R");
+  el("r-son").textContent = readSonar() + " cm";
+  el("r-mot").textContent = Math.round(world.bot.lm) + " / " + Math.round(world.bot.rm);
+  const sp = (world.bot.vl + world.bot.vr) / 2;
+  el("r-spd").textContent = Math.round(sp) + " mm/s" + (slipping ? "  slip!" : "");
+  el("r-batt").textContent = Math.round(world.batt) + "%";
+  el("v-batt").textContent = Math.round(world.batt);
+  const vS = Math.abs(sp) / 1000;
+  el("r-forces").textContent = (PHYS.airOn ? PHYS.dragK * vS * vS : 0).toFixed(4) + " / " +
+                               (PHYS.roll * PHYS.mass * G).toFixed(3) + " N";
+  el("clock").textContent = (simTime / 1000).toFixed(1) + " s";
+}
+
+/* ========================================================================
+   9. The room's controls
+   ======================================================================== */
+let tool = "move", dragging = null;
+
+function canvasToMm(ev) {
+  const r = cv.getBoundingClientRect();
+  return { x: (ev.clientX - r.left) / r.width * ROOM, y: (ev.clientY - r.top) / r.height * ROOM };
+}
+cv.addEventListener("pointerdown", ev => {
+  cv.setPointerCapture(ev.pointerId);
+  const p = canvasToMm(ev);
+  if (tool === "pen" || tool === "erase") { dragging = { kind: tool, last: p }; paint(p, p); return; }
+  const b = world.bot;
+  const nose = { x: b.x + Math.cos(b.h) * 75, y: b.y + Math.sin(b.h) * 75 };
+  if (Math.hypot(p.x - nose.x, p.y - nose.y) < 45) { dragging = { kind: "spin" }; return; }
+  if (Math.hypot(p.x - b.x, p.y - b.y) < BOT.radius + 10) { dragging = { kind: "bot" }; return; }
+  if (Math.hypot(p.x - world.lights.tx, p.y - world.lights.ty) < 70) { dragging = { kind: "torch" }; return; }
+  for (let i = world.boxes.length - 1; i >= 0; i--) {
+    const bx = world.boxes[i];
+    if (p.x > bx.x && p.x < bx.x + bx.w && p.y > bx.y && p.y < bx.y + bx.h) {
+      dragging = { kind: "box", box: bx, dx: p.x - bx.x, dy: p.y - bx.y }; return;
+    }
+  }
+});
+cv.addEventListener("pointermove", ev => {
+  if (!dragging) return;
+  const p = canvasToMm(ev);
+  if (dragging.kind === "pen" || dragging.kind === "erase") { paint(dragging.last, p); dragging.last = p; }
+  else if (dragging.kind === "torch") { world.lights.tx = p.x; world.lights.ty = p.y; }
+  else if (dragging.kind === "bot") { world.bot.x = p.x; world.bot.y = p.y; world.trail.length = 0; }
+  else if (dragging.kind === "spin") { world.bot.h = Math.atan2(p.y - world.bot.y, p.x - world.bot.x); }
+  else if (dragging.kind === "box") { dragging.box.x = p.x - dragging.dx; dragging.box.y = p.y - dragging.dy; }
+  if (!running) { draw(); instruments(); }
+});
+cv.addEventListener("pointerup", () => { if (dragging && (dragging.kind === "pen" || dragging.kind === "erase")) refreshFloor(); dragging = null; });
+
+function paint(a, b) {
+  fctx.globalCompositeOperation = tool === "erase" ? "destination-out" : "source-over";
+  fctx.strokeStyle = "rgba(10,10,12,1)";
+  fctx.lineWidth = (tool === "erase" ? 90 : 24) / MM_PER_FLOORPX;
+  fctx.lineCap = "round"; fctx.lineJoin = "round";
+  fctx.beginPath();
+  fctx.moveTo(a.x / MM_PER_FLOORPX, a.y / MM_PER_FLOORPX);
+  fctx.lineTo(b.x / MM_PER_FLOORPX, b.y / MM_PER_FLOORPX);
+  fctx.stroke();
+  fctx.globalCompositeOperation = "source-over";
+  refreshFloor();
+  if (!running) draw();
+}
+
+document.querySelectorAll("[data-tool]").forEach(btn => btn.addEventListener("click", () => {
+  tool = btn.dataset.tool;
+  document.querySelectorAll("[data-tool]").forEach(b => b.classList.toggle("on", b === btn));
+}));
+el("lights").addEventListener("click", e => {
+  world.lights.room = !world.lights.room;
+  e.target.textContent = "Room lights: " + (world.lights.room ? "on" : "off");
+  e.target.classList.toggle("on", world.lights.room);
+  if (!running) { draw(); instruments(); }
+});
+el("torch").addEventListener("click", e => {
+  world.lights.torch = !world.lights.torch;
+  e.target.textContent = "Torch: " + (world.lights.torch ? "on" : "off");
+  e.target.classList.toggle("on", world.lights.torch);
+  if (!running) { draw(); instruments(); }
+});
+el("clearLine").addEventListener("click", () => { fctx.clearRect(0, 0, FLOOR_N, FLOOR_N); refreshFloor(); draw(); });
+el("addBox").addEventListener("click", () => {
+  world.boxes.push({ x: 880, y: 320, w: 300, h: 150, z: 260, name: "box", fill: "#50596b" }); draw();
+});
+el("furnish").addEventListener("click", () => { furnish(); draw(); instruments(); });
+el("clearBoxes").addEventListener("click", () => { world.boxes.length = 0; draw(); instruments(); });
+el("trailBtn").addEventListener("click", e => {
+  world.showTrail = !world.showTrail; world.trail.length = 0;
+  e.target.classList.toggle("on", world.showTrail); draw();
+});
+el("resetBot").addEventListener("click", () => {
+  world.bot.x = 1000; world.bot.y = 1500; world.bot.h = -Math.PI / 2;
+  world.bot.lm = world.bot.rm = 0; world.bot.vl = world.bot.vr = 0;
+  world.trail.length = 0; draw(); instruments();
+});
+document.querySelectorAll("[data-press]").forEach(b => b.addEventListener("click", () => {
+  const k = b.dataset.press, cb = handlers[k];
+  if (!cb) { say("nothing is listening for " + k, "say"); return; }
+  say("pressed " + k, "say");
+  Promise.resolve(cb()).catch(e => { if (!(e instanceof Stopped)) say(e.message, "err"); });
+}));
+el("s-top").addEventListener("input", e => { cfg.top = +e.target.value; el("v-top").textContent = cfg.top; });
+el("s-dead").addEventListener("input", e => { cfg.dead = +e.target.value; el("v-dead").textContent = cfg.dead; });
+el("s-torch").addEventListener("input", e => { cfg.torch = +e.target.value; el("v-torch").textContent = cfg.torch; if (!running) { draw(); instruments(); } });
+el("s-grip").addEventListener("input", e => { PHYS.tyreGrip = +e.target.value; el("v-grip").textContent = (+e.target.value).toFixed(2); });
+el("s-mis").addEventListener("input", e => { PHYS.mismatch = +e.target.value; el("v-mis").textContent = e.target.value; });
+el("s-batt").addEventListener("input", e => { world.batt = +e.target.value; el("v-batt").textContent = e.target.value; });
+el("air").addEventListener("change", e => { PHYS.airOn = e.target.checked; });
+document.querySelectorAll("[data-floor]").forEach(btn => btn.addEventListener("click", () => {
+  const f = FLOORS[btn.dataset.floor];
+  PHYS.floor = f.name; PHYS.tyreGrip = f.mu; PHYS.roll = f.roll; cfg.dead = f.dead;
+  el("s-grip").value = f.mu; el("v-grip").textContent = f.mu.toFixed(2);
+  el("s-dead").value = f.dead; el("v-dead").textContent = f.dead;
+  document.querySelectorAll("[data-floor]").forEach(b => b.classList.toggle("on", b === btn));
+  say("floor: " + f.name + " - grip " + f.mu + ", it takes " + f.dead + "% before the wheels bite");
+}));
+el("invert").addEventListener("click", e => {
+  cfg.invert = !cfg.invert;
+  e.target.textContent = "Light sensors: higher = " + (cfg.invert ? "darker" : "brighter");
+  e.target.classList.toggle("on", cfg.invert);
+  if (!running) instruments();
+});
+el("wide").addEventListener("click", e => {
+  document.body.classList.toggle("wide");
+  const on = document.body.classList.contains("wide");
+  e.target.classList.toggle("on", on);
+  e.target.textContent = on ? "Normal size" : "Big blocks";
+});
+el("run").addEventListener("click", runProgram);
+el("stopBtn").addEventListener("click", () => stopProgram(false));
+el("step").addEventListener("click", stepOnce);
+
+/* ========================================================================
+   10. Programs to start from - the real ones, copied out of MakeCode
+   ======================================================================== */
+/* ========================================================================
+   11. The real MakeCode editor, embedded. The protocol is small: the editor
+       asks the host for its projects (workspacesync), and hands the project
+       back every time it saves (workspacesave). That is all we need.
+   ======================================================================== */
+const EDITOR_URL = "https://makecode.microbit.org/?controller=1&nocookiebanner=1";
+const STORE_KEY = "bitbot-gym-project";
+
+function starterProject() {
+  const now = Math.round(Date.now() / 1000);
+  const pxt = {
+    name: "Bit:Bot Gym",
+    description: "micro:bit and Bit:Bot XL blocks",
+    dependencies: {
+      core: "*", radio: "*", microphone: "*",
+      bitbot: "github:4tronix/BitBot#v2.1.9"   // this is what puts the Bit:Bot drawer in the toolbox
+    },
+    files: ["main.blocks", "main.ts"],
+    preferredEditor: "blocksprj"
+  };
+  return {
+    header: {
+      id: "bitbot-gym", name: "Bit:Bot Gym", meta: {}, editor: "blocksprj",
+      pubId: "", pubCurrent: false, target: "microbit", targetVersion: "9.0.12",
+      recentUse: now, modificationTime: now, path: "bitbot-gym", isDeleted: false
+    },
+    text: {
+      "main.blocks": '<xml xmlns="https://developers.google.com/blockly/xml">' +
+                     '<block type="pxt-on-start" x="12" y="12"></block></xml>',
+      "main.ts": "",
+      "pxt.json": JSON.stringify(pxt, null, 4)
+    }
+  };
+}
+
+let savedProject = null, editorFrame = null, pendingPull = null, msgId = 0, pendingImport = null, tidied = false;
+try { savedProject = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { }
+
+function startEditor() {
+  if (editorFrame) return;
+  const slot = el("editorSlot");
+  slot.innerHTML = "";
+  editorFrame = document.createElement("iframe");
+  editorFrame.id = "editor";
+  editorFrame.title = "MakeCode editor";
+  editorFrame.setAttribute("allow", "usb; clipboard-read; clipboard-write");
+  editorFrame.src = EDITOR_URL;
+  slot.appendChild(editorFrame);
+  say("starting MakeCode - the first load takes a moment", "say");
+}
+
+function sendToEditor(action, extra) {
+  if (!editorFrame) { say("the editor is not running yet", "say"); return; }
+  const id = "gym-" + (++msgId);
+  editorFrame.contentWindow.postMessage(
+    Object.assign({ type: "pxteditor", id: id, action: action, response: true }, extra || {}), "*");
+}
+
+window.addEventListener("message", ev => {
+  const msg = ev.data;
+  if (!msg || typeof msg !== "object" || msg.type !== "pxthost") return;
+
+  if (msg.action === "workspacesync") {
+    // the editor is asking what projects it has; hand it the one we want it to open
+    const give = pendingImport || savedProject || starterProject();
+    msg.projects = [give];
+    try { ev.source.postMessage(msg, "*"); } catch (e) { }
+    say(pendingImport ? "gave MakeCode the program from the .hex" : "gave MakeCode the Bit:Bot project", "say");
+    pendingImport = null;
+    if (!tidied) {                      // the editor is up, so take back the space it does not need
+      tidied = true;
+      setTimeout(() => sendToEditor("hidesimulator"), 600);
+    }
+    return;
+  }
+  if (msg.action === "workspacesave" && msg.project) {
+    savedProject = msg.project;
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(savedProject)); } catch (e) { }
+    const ts = (msg.project.text || {})["main.ts"];
+    if (typeof ts === "string" && ts.trim()) {
+      el("src").value = ts;
+      if (pendingPull) { const f = pendingPull; pendingPull = null; f(ts); }
+      else say("took the code from your blocks", "say");
+    }
+    return;
+  }
+  if (msg.action === "workspacereset" || msg.action === "workspaceloaded") {
+    try { ev.source.postMessage(msg, "*"); } catch (e) { }
+  }
+});
+
+async function pullCode() {
+  if (!editorFrame) { startEditor(); return; }
+  const ts = await new Promise(res => {
+    pendingPull = res;
+    sendToEditor("saveproject");
+    setTimeout(() => { if (pendingPull === res) { pendingPull = null; res(null); } }, 5000);
+  });
+  if (!ts) {
+    const cached = savedProject && savedProject.text && savedProject.text["main.ts"];
+    if (cached && cached.trim()) { el("src").value = cached; say("used the last code MakeCode saved", "say"); }
+    else { say("MakeCode has not given us any code yet - put a block in and try again", "err"); return; }
+  }
+  runProgram();
+}
+el("pullCode").addEventListener("click", pullCode);
+
+/* ========================================================================
+   12. Opening a .hex. A MakeCode hex carries the project inside it: records
+       of type 0x0E hold a little JSON header and then the whole project,
+       LZMA compressed. Browsers cannot do LZMA, so the decoder is fetched
+       the first time - that one step needs the internet.
+   ======================================================================== */
+let lzmaReady = null;
+function loadLZMA() {
+  if (lzmaReady) return lzmaReady;
+  lzmaReady = new Promise((res, rej) => {
+    if (window.LZMA) return res(window.LZMA);
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/lzma@2.3.2/src/lzma-d-min.js";
+    sc.onload = () => window.LZMA ? res(window.LZMA) : rej(new Error("the unpacker did not start"));
+    sc.onerror = () => rej(new Error("could not fetch the unpacker - opening a .hex needs the internet the first time"));
+    document.head.appendChild(sc);
+  });
+  return lzmaReady;
+}
+
+function embeddedBytes(buf) {
+  const text = new TextDecoder("latin1").decode(buf);
+  const out = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (line[0] !== ":") continue;
+    const n = parseInt(line.substr(1, 2), 16);
+    if (parseInt(line.substr(7, 2), 16) !== 0x0E) continue;     // 0x0E = the embedded project
+    for (let i = 0; i < n; i++) out.push(parseInt(line.substr(9 + i * 2, 2), 16));
+  }
+  return new Uint8Array(out);
+}
+
+async function openHex(file) {
+  say("opening " + file.name, "say");
+  let LZMA;
+  try { LZMA = await loadLZMA(); }
+  catch (e) { say(e.message, "err"); return; }
+
+  const bytes = embeddedBytes(await file.arrayBuffer());
+  const asText = new TextDecoder("latin1").decode(bytes);
+  const i = asText.indexOf('{"compression"');
+  if (i < 0) { say("there is no project inside that .hex - it was not built to be reopened", "err"); return; }
+  const j = asText.indexOf("}", i) + 1;
+  let meta;
+  try { meta = JSON.parse(asText.slice(i, j)); }
+  catch (e) { say("the project header in that .hex is damaged", "err"); return; }
+
+  const blob = bytes.slice(j);
+  let raw;
+  try {
+    raw = await new Promise((res, rej) =>
+      LZMA.decompress(blob, (result, err) => err ? rej(err) : res(result)));
+  } catch (e) { say("could not unpack the project: " + e, "err"); return; }
+
+  // MakeCode counts the header and text in UTF-16 units, which is what a JS string counts in too
+  const txt = typeof raw === "string" ? raw : new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  let files;
+  try { files = JSON.parse(txt.slice(meta.headerSize, meta.headerSize + meta.textSize)); }
+  catch (e) { say("the project inside that .hex did not read back cleanly", "err"); return; }
+
+  const ts = files["main.ts"];
+  if (typeof ts !== "string") { say("that project has no main.ts to run", "err"); return; }
+  el("src").value = ts;
+  say("loaded \"" + (meta.name || file.name) + "\"", "say");
+
+  // warn about anything bolted on that the gym has never heard of
+  try {
+    const deps = JSON.parse(files["pxt.json"] || "{}").dependencies || {};
+    const known = ["core", "radio", "microphone", "bitbot"];
+    const extra = Object.keys(deps).filter(d => known.indexOf(d) < 0);
+    if (extra.length) say("note: this program also uses " + extra.join(", ") + " - those blocks are not simulated", "say");
+  } catch (e) { /* no pxt.json, never mind */ }
+
+  // and the blocks go in front of the teacher, starting the editor if it is not up yet
+  const now = Math.round(Date.now() / 1000);
+  const project = {
+    header: { id: "hex-" + now, name: meta.name || file.name.replace(/\.hex$/i, ""), meta: {},
+              editor: "blocksprj", pubId: "", pubCurrent: false, target: meta.pxtTarget || "microbit",
+              targetVersion: meta.eVER || "9.0.12", recentUse: now, modificationTime: now,
+              path: "hex-" + now, isDeleted: false },
+    text: files
+  };
+  if (editorFrame) {
+    sendToEditor("importproject", { project: project });
+    say("sent the blocks to the editor", "say");
+  } else {
+    pendingImport = project;                 // the editor will ask for it as soon as it loads
+    startEditor();
+    say("starting the editor to show the blocks", "say");
+  }
+}
+
+el("openHex").addEventListener("click", () => el("hexFile").click());
+el("hexFile").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  if (f) openHex(f);
+  e.target.value = "";
+});
+// dropping a .hex anywhere on the page works too
+document.addEventListener("dragover", e => { e.preventDefault(); });
+document.addEventListener("drop", e => {
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f && /\.hex$/i.test(f.name)) { e.preventDefault(); openHex(f); }
+});
+
+
+/* Installing as an app: the browser needs the worker to be registered, and it
+   only works over https or localhost - opening the file directly just skips it. */
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => { }));
+}
+
+/* start up: the editor, as wide as the window allows.
+   One press of "Normal size" brings the instruments and the log back. */
+furnish();
+draw(); instruments();
+
+document.body.classList.add("wide");
+el("wide").classList.add("on");
+el("wide").textContent = "Normal size";
+startEditor();
+</script>
+</body>
+</html>
