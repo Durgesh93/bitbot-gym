@@ -153,6 +153,34 @@ addEventListener("keydown", e => {
                    heading: b.h + (e.key === "ArrowLeft" ? -0.15 : 0.15) });
 });
 
+/* ---- one card per robot -------------------------------------------------
+
+   This is the whole point of the probe layer, in twenty lines. The card is
+   built from `b.reads` and nothing else: it never looks at where the robot
+   is, how fast it is going or what scene is open. It does not need to. The
+   robot moved, so its probes landed somewhere new, so the numbers changed.
+   Somebody flicked a lamp off and the robot did not move at all - the
+   numbers still changed. One path in, one path out, nothing to keep in sync.
+
+   In the React gym this function becomes a component and the argument
+   becomes its props. Nothing else about it changes. */
+function cards(snap) {
+  const bar = (v, max) => '<div class="bar"><i style="width:' +
+    Math.round(100 * Math.min(1, v / max)) + '%"></i></div>';
+  const line = (k, v, max) => '<div><div class="s"><i>' + k + '</i><b>' + v +
+    "</b></div>" + (max ? bar(v, max) : "") + "</div>";
+  el("cards").innerHTML = snap.bodies.map(b => {
+    const r = b.reads;
+    if (!r) return "";
+    return '<div class="card"><h3>Bit:Bot ' + b.id + (b.held ? " (held)" : "") +
+      '</h3><div class="pair">' +
+      line("eye L", r.lightL, 1023) + line("eye R", r.lightR, 1023) +
+      line("line L", r.lineL) + line("line R", r.lineR) +
+      line("sonar", r.sonar + " cm") + line("sound", r.sound, 255) +
+      "</div></div>";
+  }).join("");
+}
+
 /* ---- the loop ----------------------------------------------------------- */
 
 /* One bad frame must not end the loop. The old gym had no try here: a single
@@ -166,6 +194,7 @@ function frame() {
     renderer.draw(snap);
     overlay();
     buildSwitches();
+    cards(snap);
     readout();
     el("status").textContent = snap.name + "  -  " + snap.size + " mm  -  " +
       snap.bodies.length + " robot(s)  -  t " + (snap.t / 1000).toFixed(1) + " s  -  seed " + snap.seed;

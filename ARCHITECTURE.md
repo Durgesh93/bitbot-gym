@@ -54,7 +54,7 @@ wherever the hand ended up and the queue never grows.
     2. devices -> forces, emitters
     3. world rebuilds its fields
     4. integrate bodies, resolve contacts
-    5. devices sample their sensors    from the SETTLED world, never during
+    5. devices sample their probes     from the SETTLED world, never during
     6. one snapshot goes out          to the cards and to the room
 
 Sensors read after physics, never during. That is what makes two runs of the
@@ -83,6 +83,29 @@ So every interaction falls out without a line of code that knows about pairs:
 
 Add a seventh device next year and it interacts with all of them on the day it
 is registered.
+
+### Probes, and what a card is drawn from
+
+A probe is a named point a device wants sampled, given in its own body's
+terms: so far forward, so far to one side, this high, facing that way.
+`world/senses.js` turns those into room coordinates once the world has
+settled and asks the right field. The Bit:Bot's six live in
+`hardware/bitbot.js`: two light eyes 55 mm forward and 34 mm apart, tilted
+46 degrees off vertical, two line sensors underneath, the sonar at the nose,
+the microphone in the middle.
+
+**What comes back is physical** - gym units, millimetres, a surface. The
+device turns that into the number a block returns: the LDR curve, the
+sonar's 2 m ceiling and its `0` for nothing there, dark or not dark. One
+Bit:Bot then works in a classroom and on a playground with nothing changed.
+
+Both go in the snapshot, beside the body, as `senses` and `reads`. **A
+robot's card is drawn from `reads` and nothing else** - never from where the
+robot is, how fast it is going, or which scene is open. It does not need
+them: the robot moved, so its probes landed somewhere new, so the numbers
+changed. Somebody flicked a lamp off and the robot did not move at all - the
+numbers still changed. One path in, one path out, and nothing to keep in
+sync. `test/app/room.test.js` holds that promise from both ends.
 
 ## The layers, and the rule that keeps them honest
 

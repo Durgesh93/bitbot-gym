@@ -27,6 +27,16 @@
   #probe { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
   #probe b { font-weight: 500; color: #8b93a7; }
   #probe span { font-variant-numeric: tabular-nums; }
+  .card { background: #11151e; border: 1px solid #2c3446; border-radius: 8px;
+          padding: 8px 10px; margin-top: 8px; }
+  .card h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+  .card .pair { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 10px; }
+  .card .s { display: flex; justify-content: space-between; font-size: 12px; }
+  .card .s i { font-style: normal; color: #8b93a7; }
+  .card .s b { font-weight: 500; font-variant-numeric: tabular-nums; min-width: 34px;
+               text-align: right; }
+  .bar { height: 4px; background: #222a38; border-radius: 2px; overflow: hidden; margin-top: 2px; }
+  .bar i { display: block; height: 100%; background: #ffd166; }
   #status { color: #8b93a7; font-size: 12px; font-variant-numeric: tabular-nums; }
   #problems { color: #ff8a8a; font-size: 12px; min-height: 18px; }
   .hint { color: #8b93a7; font-size: 12px; margin: 0; }
@@ -55,6 +65,7 @@
       <h2>Robots</h2>
       <button id="addbot">add a robot</button>
       <p class="hint">drag one about to move it; <kbd>&larr;</kbd> <kbd>&rarr;</kbd> turn the last one. The red line is its sonar.</p>
+      <div id="cards"></div>
     </div>
     <div class="panel">
       <h2>The six questions</h2>

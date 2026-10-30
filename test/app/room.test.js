@@ -169,4 +169,67 @@ describe("the room", () => {
     expect(quiet).toBe(0);
     expect(loud).toBeGreaterThan(0);
   });
+
+  /* A robot's card is drawn from its READINGS and nothing else. It never
+     looks at where the robot is - it does not have to, because anything that
+     changes where the probes land changes what they come back with. These
+     tests are that promise, from both ends. */
+  describe("what a robot's card is drawn from", () => {
+    const readsOf = (snap, id) => snap.bodies.find(b => b.id === id).reads;
+
+    it("puts the readings in the snapshot, beside the body", () => {
+      const id = bus.send(ROOM, { cmd: "add" });
+      room.tick();
+      const r = readsOf(room.snapshot(), id);
+      expect(Object.keys(r).sort())
+        .toEqual(["lightL", "lightR", "lineL", "lineR", "sonar", "sound"]);
+    });
+
+    it("changes them when the robot moves, because its probes moved", () => {
+      const id = bus.send(ROOM, { cmd: "add" });
+      bus.send(ROOM, { cmd: "place", id: id, x: 300, y: 300 });
+      room.tick();
+      const corner = readsOf(room.snapshot(), id);
+      bus.send(ROOM, { cmd: "place", id: id, x: 1000, y: 1000 });
+      room.tick();
+      const middle = readsOf(room.snapshot(), id);
+      expect(middle.sonar).not.toBe(corner.sonar);
+      expect(middle.lightL).not.toBe(corner.lightL);
+    });
+
+    it("changes them when a lamp goes off and the robot has not moved at all", () => {
+      /* the point of the whole arrangement: nothing moved, so nothing told
+         the card to redraw - the readings simply came back different */
+      const id = bus.send(ROOM, { cmd: "add" });
+      room.tick();
+      const lit = readsOf(room.snapshot(), id);
+      bus.send(ROOM, { cmd: "lamp", id: 0, on: false });
+      room.tick();
+      const dark = readsOf(room.snapshot(), id);
+      expect(dark.lightL).toBeLessThan(lit.lightL);
+      expect(dark.sonar).toBe(lit.sonar);        // geometry did not change
+    });
+
+    it("changes them when somebody else starts beeping", () => {
+      const a = bus.send(ROOM, { cmd: "add" });
+      const b = bus.send(ROOM, { cmd: "add" });
+      bus.send(ROOM, { cmd: "place", id: a, x: 1000, y: 1000 });
+      bus.send(ROOM, { cmd: "place", id: b, x: 1200, y: 1000 });
+      room.tick();
+      const quiet = readsOf(room.snapshot(), b).sound;
+      bus.send(ROOM, { cmd: "beep", id: a });
+      room.tick();
+      expect(readsOf(room.snapshot(), b).sound).toBeGreaterThan(quiet);
+    });
+
+    it("hands over the physical quantities too, beside the block numbers", () => {
+      /* so a lesson can show both: the room gives 2.8 units of light, your
+         sensor says 540 */
+      const id = bus.send(ROOM, { cmd: "add" });
+      room.tick();
+      const body = room.snapshot().bodies.find(x => x.id === id);
+      expect(body.senses.lightL).toBeGreaterThan(0);
+      expect(body.senses.lightL).not.toBe(body.reads.lightL);
+    });
+  });
 });

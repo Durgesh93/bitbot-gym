@@ -11,7 +11,7 @@
      2. (devices -> forces)
      3. tell the world it moved     so the fields rebuild once
      4. (integrate, resolve)
-     5. (devices sample sensors)    from the settled world
+     5. devices sample their probes from the settled world
      6. hand out one snapshot
 
    Steps in brackets arrive with hardware/. The order is already fixed, so
@@ -21,7 +21,14 @@ import { bus as sharedBus } from "../core/bus.js";
 import { random } from "../core/random.js";
 import { DT, clock, resetClock, advance } from "../core/time.js";
 import { createEnvironment } from "../world/environment.js";
+import { sample } from "../world/senses.js";
 import { SCENES, DEFAULT_SCENE } from "../world/scenes/index.js";
+import * as bitbot from "../hardware/bitbot.js";
+
+/* Every kind of thing that can be put in the room: where its senses are, and
+   how it turns what the world says into the number a block returns. Adding a
+   second chassis is one more line here. */
+const DEVICES = { bitbot: bitbot };
 
 export const ROOM = "world";
 
@@ -59,9 +66,13 @@ export function createRoom(options) {
     const body = {
       id: s.id == null ? nextId++ : s.id,
       x: at.x, y: at.y, h: at.heading == null ? 0 : at.heading,
-      r: s.r == null ? 62 : s.r,
+      r: s.r == null ? bitbot.CHASSIS.radius : s.r,
       z: s.z == null ? 95 : s.z,
-      held: false
+      held: false,
+      device: s.device || "bitbot",
+      /* this robot's own small squint, fixed for its whole life, so its two
+         eyes never read exactly the same and a light-chaser can choose */
+      trim: s.trim == null ? random.int(-6, 6) : s.trim
     };
     bodies.push(body);
     env.setBodies(bodies);
@@ -146,12 +157,37 @@ export function createRoom(options) {
     for (const e of emitters) { const b = find(e.owner); if (b) { e.x = b.x; e.y = b.y; } }
     env.setEmitters(emitters);
 
+    /* 5. Now, and only now, the sensors. The world has settled, so every
+       probe on every robot is reading the same instant - which is what stops
+       one eye seeing a lamp the other one missed. */
+    senses.clear();
+    for (const b of bodies) {
+      const dev = DEVICES[b.device];
+      if (!dev) continue;
+      const raw = sample(env, b, dev.PROBES);
+      senses.set(b.id, { senses: raw, reads: dev.read(raw, b.trim) });
+    }
+
     advance(DT);
     return drained;
   }
 
+  /* What each body's probes last came back with: the physical quantities the
+     world handed over, and the numbers its blocks would return. Keyed by id,
+     emptied and refilled every tick. */
+  const senses = new Map();
+
+  /* One object a tick, and the card for a robot is drawn from nothing else.
+     That is why the card does not care that the robot moved: it moved, so its
+     probes landed somewhere new, so the readings changed, so the card is
+     different. Position is never read by the card at all. */
   function snapshot() {
-    return { t: clock.now, scene: sceneName, seed: seed, ...env.snapshot() };
+    const s = env.snapshot();
+    s.bodies = s.bodies.map(b => {
+      const got = senses.get(b.id);
+      return got ? { ...b, senses: got.senses, reads: got.reads } : b;
+    });
+    return { t: clock.now, scene: sceneName, seed: seed, ...s };
   }
 
   /* The room's light, as a square of samples for the renderer. Twelve
