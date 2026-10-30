@@ -1769,8 +1769,8 @@ async function runDevice(m) {
     log.innerHTML = "";
     stageCards.forEach(c => { if (c.log) c.log.innerHTML = ""; });
     running = true;
-    loop();
   }
+  loop();            // starts the clock, or picks it up again if it ever stopped
   const p0 = placeOf(m);
   m.start = { x: p0.x, y: p0.y, h: p0.h };        // Reset brings it back here
   m.live = true;
@@ -1856,16 +1856,34 @@ function nextFrame() {
     setTimeout(fire, 50);
   });
 }
+/* The loop must survive a bad frame. It used to have no net at all: one
+   error anywhere inside it ended the loop for good, and because `running`
+   stayed true nothing ever started it again - so every later Play did
+   nothing, the clock sat still and no card number changed. Now a bad frame
+   is said once and the loop carries on, and loopAlive lets Play pick the
+   loop up again if it ever does stop. */
+let loopAlive = false;
 async function loop() {
-  while (running) {
-    const steps = Math.max(1, Math.round(16.7 * Number(document.getElementById("speed").value) / DT));
-    for (let i = 0; i < steps; i++) {
-      physics(DT); simTime += DT; flushTimers();
-      await Promise.resolve();
+  if (loopAlive) return;                 // one loop at a time, never two
+  loopAlive = true;
+  let moaned = false;
+  try {
+    while (running) {
+      try {
+        const steps = Math.max(1, Math.round(16.7 * Number(document.getElementById("speed").value) / DT));
+        for (let i = 0; i < steps; i++) {
+          physics(DT); simTime += DT; flushTimers();
+          await Promise.resolve();
+        }
+        soundWatch();
+        draw(); instruments(); updateStage();
+      } catch (e) {
+        if (!moaned) { moaned = true; say("something went wrong in the room: " + e.message, "err"); }
+      }
+      await nextFrame();
     }
-    soundWatch();
-    draw(); instruments(); updateStage();
-    await nextFrame();
+  } finally {
+    loopAlive = false;
   }
   draw(); instruments();
 }
