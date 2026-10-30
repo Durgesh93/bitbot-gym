@@ -1,0 +1,17 @@
+{
+  "order": [
+    "model/world.js",
+    "model/physics.js",
+    "model/clock.js",
+    "controller/blocks.js",
+    "controller/program.js",
+    "controller/loop.js",
+    "view/draw.js",
+    "view/instruments.js",
+    "controller/room-controls.js",
+    "controller/starter-programs.js",
+    "controller/editor.js",
+    "controller/hex.js",
+    "view/stage.js"
+  ]
+}
