@@ -81,6 +81,13 @@ body.wide iframe#editor, body.wide .editor-off { height: 700px; }
 
 /* code side */
 .tabs { display: flex; gap: 6px; margin-bottom: 9px; }
+.devices { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  padding: 5px 10px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--panel-2);
+}
+.chip i { width: 9px; height: 9px; border-radius: 50%; display: block; }
+.chip span { color: var(--muted); font-size: 11px; }
 .tabs button { padding: 6px 13px; font-size: 12.5px; }
 iframe#editor { width: 100%; border: 1px solid var(--line); border-radius: 9px; background: #0d1017; display: block; }
 .editor-off { height: 100%; display: grid; place-content: center; text-align: center; gap: 10px;
@@ -170,7 +177,12 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
   <section class="panel code">
     <h2>Program</h2>
     <div id="pane-blocks">
+      <div class="devices" id="devices"></div>
       <div class="presets">
+        <button id="addMbit">Add micro:bit</button>
+        <button id="addBot">Add Bit:Bot</button>
+        <label class="inline">plugged into <select id="plugSel"></select></label>
+        <button id="delDev">Remove</button>
         <button id="pullCode" class="go">Take the code &amp; run</button>
       </div>
     <div class="toprow">
@@ -263,7 +275,7 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
       <div class="bar"><i id="b-lr"></i></div>
     </div>
     <div class="panel">
-      <h2>micro:bit</h2>
+      <h2>micro:bit <span id="mbName" style="float:right;font-weight:700"></span></h2>
       <div class="screen" id="screen"></div>
       <div class="pixrow" id="pix"></div>
       <div class="mbtns" style="margin-top:10px">
@@ -304,20 +316,52 @@ const BOT = {
   sonarFwd: 62
 };
 
+const MAX_MICROBITS = 10, MAX_BOTS = 6;
+const COLOURS = ["#5bc0eb", "#f2b134", "#46c37b", "#e8575a", "#c77dff", "#2dd4bf",
+                 "#ff8fab", "#9bc53d", "#fca311", "#8ecae6"];
+
+/* A micro:bit is the brain: it holds the program, the screen, the buttons and
+   the radio. A Bit:Bot is the body: wheels, lights, line and light sensors and
+   the sonar. Plug one into the other and the program can drive. Unplugged, a
+   micro:bit is just a board in a child's hand - which is all the radio lessons
+   ever needed. */
+let nextId = 1;
+
+function makeMicrobit(name, colour, x, y) {
+  return {
+    id: nextId++, name: name, colour: colour,
+    x: x, y: y, h: -Math.PI / 2,            // where it sits when nobody has plugged it in
+    code: "", project: null,
+    screen: new Array(25).fill(0),
+    radioGroup: 0,
+    timers: [], token: 0, foreverQueue: [], handlers: {}, noted: new Set()
+  };
+}
+
+function makeBot(name, x, y) {
+  return {
+    id: nextId++, name: name, host: null,   // the id of the micro:bit plugged in
+    x: x, y: y, h: -Math.PI / 2,
+    lm: 0, rm: 0, vl: 0, vr: 0, brake: false,
+    enc: { l: 0, r: 0 }, bias: { dir: null, amount: 0 },
+    model: "XL", batt: 100,
+    pixels: new Array(12).fill(null), pixelBright: 40,
+    trail: []
+  };
+}
+
 const world = {
-  bot: { x: 1000, y: 1500, h: -Math.PI / 2, lm: 0, rm: 0, vl: 0, vr: 0, brake: false },
+  mbits: [], bots: [], sel: 0,
   lights: { room: true, torch: false, tx: 1680, ty: 1720, cx: 1000, cy: 1000, H: 2400 },
   boxes: [],
-  batt: 100,
-  trail: [],
-  showTrail: true,
-  model: "XL",
-  enc: { l: 0, r: 0 },
-  bias: { dir: null, amount: 0 },
-  pixels: new Array(12).fill(null),
-  pixelBright: 40,
-  screen: new Array(25).fill(0)
+  showTrail: true
 };
+
+const mbit = () => world.mbits[world.sel] || world.mbits[0];
+const botOf = m => (m ? world.bots.find(b => b.host === m.id) || null : null);
+const hostOf = b => world.mbits.find(m => m.id === b.host) || null;
+// where a micro:bit actually is: in its Bit:Bot, or wherever it was put down
+const placeOf = m => botOf(m) || m;
 
 const cfg = { top: 450, dead: 15, torch: 1200, invert: false };
 
@@ -364,92 +408,100 @@ const PHYS = {
 };
 
 // the commanded speed of a wheel, before the world has its say
-function wheelSpeed(percent) {
+// the commanded speed of a wheel, before the world has its say
+function wheelSpeed(b, percent) {
   const a = Math.abs(percent);
   if (a <= cfg.dead) return 0;
-  const batt = 0.6 + 0.4 * world.batt / 100;          // a tired battery is a slower robot
+  const batt = 0.6 + 0.4 * b.batt / 100;              // a tired battery is a slower robot
   const s = cfg.top * batt * (a - cfg.dead) / (100 - cfg.dead);
   return percent < 0 ? -s : s;
 }
 
 // how fast one wheel's speed is changing, in mm/s^2, and whether it is slipping
-function wheelAccel(v, cmdPct, side) {
+function wheelAccel(b, v, cmdPct, side) {
   const vS = v / 1000;
-  let vT = wheelSpeed(cmdPct) / 1000;
-  if (side === "R") vT *= 1 + PHYS.mismatch / 100;     // the two motors are never twins
-  if (world.bias.dir === "L" && side === "L") vT *= 1 - world.bias.amount / 100;
-  if (world.bias.dir === "R" && side === "R") vT *= 1 - world.bias.amount / 100;
+  let vT = wheelSpeed(b, cmdPct) / 1000;
+  if (side === "R") vT *= 1 + PHYS.mismatch / 100;    // the two motors are never twins
+  if (b.bias.dir === side) vT *= 1 - b.bias.amount / 100;
 
   const powered = cmdPct !== 0 && vT !== 0;
   let F = powered ? PHYS.k * (vT - vS)
-        : world.bot.brake ? -PHYS.kBrake * vS : 0;     // Brake fights the motion, Coast does not
+        : b.brake ? -PHYS.kBrake * vS : 0;            // Brake fights the motion, Coast does not
 
   const moving = Math.abs(vS) > 1e-3;
   if (moving) {
-    const rollC = PHYS.roll + (powered ? 0 : PHYS.gearDrag);        // the gearbox only fights you when it is not driving
-    F -= Math.sign(vS) * rollC * PHYS.mass * G;                     // the floor and the gears
-    if (PHYS.airOn) F -= Math.sign(vS) * PHYS.dragK * vS * vS;      // the air, for completeness
+    const rollC = PHYS.roll + (powered ? 0 : PHYS.gearDrag);
+    F -= Math.sign(vS) * rollC * PHYS.mass * G;
+    if (PHYS.airOn) F -= Math.sign(vS) * PHYS.dragK * vS * vS;
   }
   let a = F / PHYS.mass;
-  const aMax = PHYS.tyreGrip * G;                       // the tyres cannot push harder than they grip
+  const aMax = PHYS.tyreGrip * G;
   let slip = false;
   if (Math.abs(a) > aMax) { a = Math.sign(a) * aMax; slip = true; }
-  // without this a stopped robot shivers as friction flips sign every step
   if (!powered && !moving && Math.abs(F) < (PHYS.roll + PHYS.gearDrag) * PHYS.mass * G * 1.01)
     return { a: -v / (DT / 1000), slip: false };
-  return { a: a * 1000, slip };
+  return { a: a * 1000, slip: slip };
 }
 
-let bumped = false, slipping = false;
+let slipping = false;
 
 function physics(dt) {
-  const b = world.bot, h = dt / 1000;
+  const h = dt / 1000;
+  slipping = false;
+  for (const b of world.bots) {
+    const L = wheelAccel(b, b.vl, b.lm, "L");
+    const R = wheelAccel(b, b.vr, b.rm, "R");
+    if (L.slip || R.slip) slipping = true;
+    b.vl += L.a * h;
+    b.vr += R.a * h;
+    b.batt = Math.max(0, b.batt - (Math.abs(b.lm) + Math.abs(b.rm)) / 200 * 0.12 * h);
+    b.enc.l += b.vl * h;
+    b.enc.r += b.vr * h;
 
-  const L = wheelAccel(b.vl, b.lm, "L");
-  const R = wheelAccel(b.vr, b.rm, "R");
-  slipping = L.slip || R.slip;
-  b.vl += L.a * h;
-  b.vr += R.a * h;
+    const v = (b.vl + b.vr) / 2;
+    const w = (b.vl - b.vr) / BOT.axle;     // canvas y points down, so this is clockwise-positive
+    b.x += v * Math.cos(b.h) * h;
+    b.y += v * Math.sin(b.h) * h;
+    b.h += w * h;
 
-  // the battery goes down while the motors are working
-  world.batt = Math.max(0, world.batt - (Math.abs(b.lm) + Math.abs(b.rm)) / 200 * 0.12 * h);
+    let bumped = false;
+    const Rr = BOT.radius;
+    if (b.x < Rr) { b.x = Rr; bumped = true; }
+    if (b.y < Rr) { b.y = Rr; bumped = true; }
+    if (b.x > ROOM - Rr) { b.x = ROOM - Rr; bumped = true; }
+    if (b.y > ROOM - Rr) { b.y = ROOM - Rr; bumped = true; }
 
-  world.enc.l += b.vl * h;
-  world.enc.r += b.vr * h;
+    for (const bx of world.boxes) {
+      const cx = Math.max(bx.x, Math.min(b.x, bx.x + bx.w));
+      const cy = Math.max(bx.y, Math.min(b.y, bx.y + bx.h));
+      let dx = b.x - cx, dy = b.y - cy, d = Math.hypot(dx, dy);
+      if (d < Rr) {
+        if (d < 0.001) { dx = 0; dy = -1; d = 1; }
+        b.x = cx + dx / d * Rr; b.y = cy + dy / d * Rr; bumped = true;
+      }
+    }
+    // and into each other, which is half the fun of having more than one
+    for (const o of world.bots) {
+      if (o === b) continue;
+      const dx = b.x - o.x, dy = b.y - o.y, d = Math.hypot(dx, dy);
+      if (d < Rr * 2 && d > 0.001) {
+        const push = (Rr * 2 - d) / 2;
+        b.x += dx / d * push; b.y += dy / d * push;
+        o.x -= dx / d * push; o.y -= dy / d * push;
+        bumped = true;
+      }
+    }
+    if (bumped) { b.vl *= 0.2; b.vr *= 0.2; }
 
-  const v = (b.vl + b.vr) / 2;
-  const w = (b.vl - b.vr) / BOT.axle;     // canvas y points down, so this is clockwise-positive
-  b.x += v * Math.cos(b.h) * h;
-  b.y += v * Math.sin(b.h) * h;
-  b.h += w * h;
-  shadowsStale = true;                        // the robot moved, so its shadow has too
-
-  bumped = false;
-  const Rr = BOT.radius;
-  if (b.x < Rr) { b.x = Rr; bumped = true; }
-  if (b.y < Rr) { b.y = Rr; bumped = true; }
-  if (b.x > ROOM - Rr) { b.x = ROOM - Rr; bumped = true; }
-  if (b.y > ROOM - Rr) { b.y = ROOM - Rr; bumped = true; }
-
-  for (const bx of world.boxes) {
-    const cx = Math.max(bx.x, Math.min(b.x, bx.x + bx.w));
-    const cy = Math.max(bx.y, Math.min(b.y, bx.y + bx.h));
-    let dx = b.x - cx, dy = b.y - cy;
-    let d = Math.hypot(dx, dy);
-    if (d < Rr) {
-      if (d < 0.001) { dx = 0; dy = -1; d = 1; }
-      b.x = cx + dx / d * Rr; b.y = cy + dy / d * Rr; bumped = true;
+    if (world.showTrail && Math.abs(v) + Math.abs(w) > 0.5) {
+      const last = b.trail[b.trail.length - 1];
+      if (!last || Math.hypot(last.x - b.x, last.y - b.y) > 8) {
+        b.trail.push({ x: b.x, y: b.y });
+        if (b.trail.length > 900) b.trail.shift();
+      }
     }
   }
-  if (bumped) { b.vl *= 0.2; b.vr *= 0.2; }       // running into something costs you your speed
-
-  if (world.showTrail && Math.abs(v) + Math.abs(w) > 0.5) {
-    const last = world.trail[world.trail.length - 1];
-    if (!last || Math.hypot(last.x - b.x, last.y - b.y) > 8) {
-      world.trail.push({ x: b.x, y: b.y });
-      if (world.trail.length > 1200) world.trail.shift();
-    }
-  }
+  shadowsStale = true;
 }
 
 function furnish() {
@@ -507,20 +559,26 @@ function pointInPoly(x, y, poly) {
    the furniture-only set is what the sensors read. The robot is in the first
    but not the second - its own shadow must not fall on its own eyes. */
 let shadowsStale = true;
-let SHADOWS = { room: [], torch: [] };        // for drawing: furniture and the robot
-let SEEN = { room: [], torch: [] };           // for sensing: furniture alone
+let SHADOWS = { room: [], torch: [] };        // for drawing: furniture and every robot
+let SEEN = { room: [], torch: [] };           // for sensing: the same, tagged with who cast it
 function buildShadows() {
   const ceil = { x: world.lights.cx, y: world.lights.cy, H: world.lights.H };
   const torch = { x: world.lights.tx, y: world.lights.ty, H: 110 };
-  const bot = { x: world.bot.x - BOT.radius, y: world.bot.y - BOT.radius,
-                w: BOT.radius * 2, h: BOT.radius * 2, z: 95 };
-  SEEN.room = world.lights.room ? world.boxes.map(bx => shadowQuad(bx, ceil)) : [];
-  SEEN.torch = world.lights.torch ? world.boxes.map(bx => shadowQuad(bx, torch)) : [];
-  SHADOWS.room = world.lights.room ? SEEN.room.concat([shadowQuad(bot, ceil)]) : [];
-  SHADOWS.torch = world.lights.torch ? SEEN.torch.concat([shadowQuad(bot, torch)]) : [];
+  const casters = world.boxes.map(bx => ({ box: bx, owner: null })).concat(
+    world.bots.map(b => ({
+      box: { x: b.x - BOT.radius, y: b.y - BOT.radius, w: BOT.radius * 2, h: BOT.radius * 2, z: 95 },
+      owner: b
+    })));
+  SEEN.room = world.lights.room ? casters.map(c => ({ poly: shadowQuad(c.box, ceil), owner: c.owner })) : [];
+  SEEN.torch = world.lights.torch ? casters.map(c => ({ poly: shadowQuad(c.box, torch), owner: c.owner })) : [];
+  SHADOWS.room = SEEN.room.map(e => e.poly);
+  SHADOWS.torch = SEEN.torch.map(e => e.poly);
 }
-function inShadow(x, y, which) {
-  for (const poly of SEEN[which]) if (pointInPoly(x, y, poly)) return true;
+function inShadow(x, y, which, self) {
+  for (const e of SEEN[which]) {
+    if (e.owner && e.owner === self) continue;    // your own shadow is not on your own sensors
+    if (pointInPoly(x, y, e.poly)) return true;
+  }
   return false;
 }
 function lampsOn() {
@@ -532,7 +590,7 @@ function lampsOn() {
   return out;
 }
 // illuminance in arbitrary but consistent units; facing is a heading, or null for "pointing at the ceiling"
-function illuminance(x, y, facing) {
+function illuminance(x, y, facing, self) {
   if (shadowsStale) { buildShadows(); shadowsStale = false; }
   let e = world.lights.room ? 0.05 : 0.004;          // light bouncing round the room
   for (const L of lampsOn()) {
@@ -545,7 +603,7 @@ function illuminance(x, y, facing) {
       if (cos <= 0) continue;                        // the lamp is behind this sensor
       aim = cos;                                     // Lambert
     }
-    if (inShadow(x, y, L.key)) continue;             // this spot is in that lamp's shadow
+    if (inShadow(x, y, L.key, self)) continue;       // this spot is in that lamp's shadow
     const h2 = (L.H / 1000) * (L.H / 1000);          // the lamp is up in the air, not on the floor
     e += L.I * aim / (d2 + h2 + 0.09);               // inverse square, softened close up
   }
@@ -556,27 +614,30 @@ function ldr(e, full) {
   const r = e / (e + 0.45);
   return clamp(Math.round(full * Math.pow(r, 0.85)), 0, full);
 }
-function sensorPoint(fwd, side) {
-  const b = world.bot, c = Math.cos(b.h), s = Math.sin(b.h);
+function sensorPoint(b, fwd, side) {
+  const c = Math.cos(b.h), s = Math.sin(b.h);
   return { x: b.x + c * fwd - s * side, y: b.y + s * fwd + c * side };
 }
-function readLightSensor(which) {
+function readLightSensor(b, which) {
   const side = which === "L" ? -BOT.senSide : BOT.senSide;
-  const p = sensorPoint(BOT.senFwd, side);
-  const facing = world.bot.h + (which === "L" ? -BOT.senAngle : BOT.senAngle);
-  let v = ldr(illuminance(p.x, p.y, facing), 1023) + Math.round(Math.random() * 6 - 3);
+  const p = sensorPoint(b, BOT.senFwd, side);
+  const facing = b.h + (which === "L" ? -BOT.senAngle : BOT.senAngle);
+  // real sensors jitter by a unit or two, which is also what breaks a dead heat
+  let v = ldr(illuminance(p.x, p.y, facing, b), 1023) + Math.round(Math.random() * 6 - 3);
   if (cfg.invert) v = 1023 - v;
   return clamp(v, 0, 1023);
 }
-function readScreenLight() {
-  const b = world.bot;
-  return ldr(illuminance(b.x, b.y, null), 255);
+// the micro:bit's own screen doubles as a light meter, wherever the board is
+function readScreenLight(m) {
+  const p = placeOf(m);
+  return ldr(illuminance(p.x, p.y, null, botOf(m)), 255);
 }
-function readLineSensor(which) {
+function readLineSensor(b, which) {
   const side = which === "L" ? -BOT.lineSide : which === "R" ? BOT.lineSide : 0;   // C is the PRO's middle one
-  const p = sensorPoint(BOT.lineFwd, side);
+  const p = sensorPoint(b, BOT.lineFwd, side);
   return isDark(p.x, p.y) ? 1 : 0;
 }
+
 /* ---- the Earth's magnetic field -------------------------------------------
    Over southern Norway the field is about 50 uT but it points steeply DOWN:
    roughly 72 degrees below horizontal. Only the small horizontal part, some
@@ -584,17 +645,16 @@ function readLineSensor(which) {
    upset. North is up the screen; declination tilts true north a little east. */
 const FIELD = { total: 50.5, inclination: 72, declination: 3 };
 
-function compassHeadingDeg() {
-  // heading measured clockwise from north, with north straight up the screen
-  const h = (world.bot.h * 180 / Math.PI + 90 - FIELD.declination) % 360;
+function compassHeadingDeg(m) {
+  const h = (placeOf(m).h * 180 / Math.PI + 90 - FIELD.declination) % 360;
   return Math.round((h + 360) % 360);
 }
-// what the three axes read, in microtesla, for a board lying flat on the robot
-function magneticForce(axis) {
+// what the three axes read, in microtesla, for a board lying flat
+function magneticForce(m, axis) {
   const incl = FIELD.inclination * Math.PI / 180;
   const H = FIELD.total * Math.cos(incl);          // the horizontal part, about 15 uT
   const Z = FIELD.total * Math.sin(incl);          // the vertical part, about 48 uT, downwards
-  const t = compassHeadingDeg() * Math.PI / 180;
+  const t = compassHeadingDeg(m) * Math.PI / 180;
   const noise = () => (Math.random() - 0.5) * 0.6;
   if (axis === "x") return Math.round((-H * Math.sin(t) + noise()) * 10) / 10;
   if (axis === "y") return Math.round((H * Math.cos(t) + noise()) * 10) / 10;
@@ -617,8 +677,8 @@ function rayDistance(ox, oy, ang) {
   }
   return Infinity;
 }
-function readSonar() {
-  const b = world.bot, c = Math.cos(b.h), s = Math.sin(b.h);
+function readSonar(b) {
+  const c = Math.cos(b.h), s = Math.sin(b.h);
   const ox = b.x + c * BOT.sonarFwd, oy = b.y + s * BOT.sonarFwd;
   let best = Infinity;
   for (let i = -3; i <= 3; i++) best = Math.min(best, rayDistance(ox, oy, b.h + i * 0.044));  // a 15 degree cone
@@ -630,30 +690,47 @@ function readSonar() {
    3. The clock the program lives on. Every pause and every timed move waits
       on simulated time, which is what lets us run at 8x or single-step.
    ======================================================================== */
-let simTime = 0, running = false, token = 0, timers = [];
+let simTime = 0, running = false;
 class Stopped extends Error {}
 
-function wait(ms) {
-  const my = token;
-  return new Promise((res, rej) => timers.push({ t: simTime + Math.max(0, ms), res, rej, my }));
+function wait(m, ms) {
+  const my = m.token;
+  return new Promise((res, rej) => m.timers.push({ t: simTime + Math.max(0, ms), res, rej, my }));
 }
 function flushTimers() {
-  if (!timers.length) return;
-  const due = timers.filter(t => t.t <= simTime);
-  if (!due.length) return;
-  timers = timers.filter(t => t.t > simTime);
-  for (const t of due) t.my === token ? t.res() : t.rej(new Stopped());
+  for (const m of world.mbits) {
+    if (!m.timers.length) continue;
+    const due = m.timers.filter(t => t.t <= simTime);
+    if (!due.length) continue;
+    m.timers = m.timers.filter(t => t.t > simTime);
+    for (const t of due) t.my === m.token ? t.res() : t.rej(new Stopped());
+  }
 }
-function killTimers() { const old = timers; timers = []; for (const t of old) t.rej(new Stopped()); }
+function killTimers(m) {
+  const old = m.timers; m.timers = [];
+  for (const t of old) t.rej(new Stopped());
+}
 
 /* ========================================================================
    4. The MakeCode shims. These are the blocks, written out as the robot
       and the board would really behave.
    ======================================================================== */
 const log = document.getElementById("log");
-function say(msg, cls) {
+function say(msg, cls, m) {
   const d = document.createElement("div");
   if (cls) d.className = cls;
+  if (m) {
+    const tag = document.createElement("b");
+    tag.textContent = m.name + " ";
+    tag.style.color = m.colour;
+    d.appendChild(document.createTextNode((simTime / 1000).toFixed(1).padStart(5) + "  "));
+    d.appendChild(tag);
+    d.appendChild(document.createTextNode(msg));
+    log.appendChild(d);
+    while (log.children.length > 400) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+    return;
+  }
   d.textContent = (simTime / 1000).toFixed(1).padStart(5) + "  " + msg;
   log.appendChild(d);
   while (log.children.length > 300) log.removeChild(log.firstChild);
@@ -682,12 +759,12 @@ const screenEls = [];
   for (let i = 0; i < 12; i++) { const e = document.createElement("i"); p.appendChild(e); }
 })();
 
-function setScreen(pattern) {
-  for (let i = 0; i < 25; i++) world.screen[i] = pattern[i] === "1" ? 1 : 0;
+function setScreen(m, pattern) {
+  for (let i = 0; i < 25; i++) m.screen[i] = pattern[i] === "1" ? 1 : 0;
 }
-function screenFromLeds(text) {
+function screenFromLeds(m, text) {
   const bits = String(text).replace(/[^#.]/g, "").replace(/#/g, "1").replace(/\./g, "0");
-  setScreen(bits.padEnd(25, "0").slice(0, 25));
+  setScreen(m, bits.padEnd(25, "0").slice(0, 25));
 }
 /* The 5x5 font. One digit or one letter stands still; anything longer
    scrolls in from the right, a column at a time, exactly as the board does. */
@@ -720,7 +797,7 @@ const FONT = {
 const GLYPH_UNKNOWN = "11111 10001 10101 10001 11111";
 
 function glyph(ch) { return (FONT[String(ch).toUpperCase()] || GLYPH_UNKNOWN).replace(/ /g, ""); }
-function showGlyph(ch) { setScreen(glyph(ch)); }
+function showGlyph(m, ch) { setScreen(m, glyph(ch)); }
 
 // one column of the whole message, as five bits top to bottom
 function messageColumns(text) {
@@ -738,7 +815,7 @@ function messageColumns(text) {
   return cols;
 }
 
-async function scrollText(text, interval) {
+async function scrollText(m, text, interval) {
   const cols = messageColumns(text);
   const gap = interval || 150;
   for (let offset = -4; offset <= cols.length; offset++) {
@@ -748,23 +825,23 @@ async function scrollText(text, interval) {
       if (!col) continue;
       for (let r = 0; r < 5; r++) out[r * 5 + c] = col[r];
     }
-    setScreen(out.join(""));
-    await wait(gap);
+    setScreen(m, out.join(""));
+    await wait(m, gap);
   }
-  setScreen("0".repeat(25));
+  setScreen(m, "0".repeat(25));
 }
 
 // a single character sits still; a longer one scrolls, which is what the board does
-async function showText(text, interval) {
+async function showText(m, text, interval) {
   const str = String(text);
-  if (str.length <= 1) { showGlyph(str); await wait((interval || 150) * 4); return; }
-  await scrollText(str, interval);
+  if (str.length <= 1) { showGlyph(m, str); await wait(m, (interval || 150) * 4); return; }
+  await scrollText(m, str, interval);
 }
 
 /* Sound is not simulated: the gym is about what the robot does. Every sound
    block still runs and still takes its time, and the log says what played. */
 
-const handlers = { A: null, B: null, AB: null, shake: null, logo: null };
+
 
 const ENUMS = {
   /* ---- the micro:bit side ---- */
@@ -814,8 +891,9 @@ const ENUMS = {
 };
 
 /* said once per run, so a note does not drown the log */
-let noted = new Set();
-function once(key, msg, cls) { if (!noted.has(key)) { noted.add(key); say(msg, cls || "say"); } }
+function once(m, key, msg, cls) {
+  if (!m.noted.has(key)) { m.noted.add(key); say(msg, cls || "say", m); }
+}
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 function cssOf(rgb) {
@@ -823,265 +901,290 @@ function cssOf(rgb) {
   const n = clamp(Math.round(rgb || 0), 0, 0xffffff);
   return "#" + n.toString(16).padStart(6, "0");
 }
-function proOnly(name) {
-  if (world.model === "PRO") return false;
-  once("pro:" + name, "note: " + name + " only does anything on a Bit:Bot PRO - your " + world.model + " ignores it");
+function proOnly(m, b, name) {
+  if (b && b.model === "PRO") return false;
+  once(m, "pro:" + name, "note: " + name + " only does anything on a Bit:Bot PRO - your " +
+       (b ? b.model : "XL") + " ignores it");
   return true;
 }
 
-function makeApi() {
+/* ---- the radio: one shared air, and a board never hears itself ---- */
+function radioSend(from, kind, value, name) {
+  for (const m2 of world.mbits) {
+    if (m2 === from || m2.radioGroup !== from.radioGroup) continue;
+    const h = kind === "number" ? m2.handlers.radioNumber
+            : kind === "string" ? m2.handlers.radioString : m2.handlers.radioValue;
+    m2.lastFrom = from;
+    if (!h) continue;
+    Promise.resolve(h(value, name)).catch(e => { if (!(e instanceof Stopped)) say(e.message, "err", m2); });
+  }
+}
+// how strong the signal was, which is really just how far away the sender is
+function signalStrength(m) {
+  const from = m.lastFrom;
+  if (!from) return -128;
+  const a = placeOf(m), b = placeOf(from);
+  const d = Math.hypot(a.x - b.x, a.y - b.y) / 1000;
+  return Math.round(clamp(-42 - 26 * Math.log10(d + 0.12), -95, -30));
+}
+
+function makeApi(m) {
+  let b = botOf(m);
+  const sayd = (t, c) => say(t, c, m);
+
   const basic = {
-    showIcon: (name) => { setScreen(ICONS[name] || UNKNOWN); say("show icon " + name); },
-    showLeds: (s) => { screenFromLeds(s); say("show leds"); },
+    showIcon: (name) => { setScreen(m, ICONS[name] || UNKNOWN); sayd("show icon " + name); },
+    showLeds: (s) => { screenFromLeds(m, s); sayd("show leds"); },
     showNumber: async (n, interval) => {
       const str = String(Math.round(n * 1000) / 1000);
-      say("show number " + str + (str.length > 1 ? "  (it has to scroll)" : ""));
-      await showText(str, interval);
+      sayd("show number " + str + (str.length > 1 ? "  (it has to scroll)" : ""));
+      await showText(m, str, interval);
     },
     showString: async (t, interval) => {
       const str = String(t);
-      say("show \"" + str + "\"" + (str.length > 1 ? "  (it has to scroll)" : ""));
-      await showText(str, interval);
+      sayd("show \"" + str + "\"" + (str.length > 1 ? "  (it has to scroll)" : ""));
+      await showText(m, str, interval);
     },
-    clearScreen: () => setScreen("0".repeat(25)),
-    pause: async (ms) => { await wait(ms); },
-    forever: (cb) => foreverQueue.push(cb)
+    clearScreen: () => setScreen(m, "0".repeat(25)),
+    pause: async (ms) => { await wait(m, ms); },
+    forever: (cb) => m.foreverQueue.push(cb)
   };
   const input = {
-    lightLevel: () => readScreenLight(),
+    lightLevel: () => readScreenLight(m),
     temperature: () => 21,
     buttonIsPressed: () => false,
-    onButtonPressed: (b, cb) => { handlers[b] = cb; },
-    onGesture: (g, cb) => { handlers[g] = cb; },
-    onLogoEvent: (e, cb) => { handlers.logo = cb; },
+    onButtonPressed: (btn, cb) => { m.handlers[btn] = cb; },
+    onGesture: (g, cb) => { m.handlers[g] = cb; },
+    onLogoEvent: (e, cb) => { m.handlers.logo = cb; },
     acceleration: () => 0,
-    compassHeading: () => compassHeadingDeg(),
-    magneticForce: (dim) => magneticForce(dim),
-    calibrateCompass: () => say("compass calibrated"),
+    compassHeading: () => compassHeadingDeg(m),
+    magneticForce: (dim) => magneticForce(m, dim),
+    calibrateCompass: () => sayd("compass calibrated"),
     isCalibrated: () => true,
     runningTime: () => Math.round(simTime)
   };
   const led = {
-    plot: (x, y) => { world.screen[y * 5 + x] = 1; },
-    unplot: (x, y) => { world.screen[y * 5 + x] = 0; },
-    toggle: (x, y) => { world.screen[y * 5 + x] ^= 1; },
+    plot: (x, y) => { m.screen[y * 5 + x] = 1; },
+    unplot: (x, y) => { m.screen[y * 5 + x] = 0; },
+    toggle: (x, y) => { m.screen[y * 5 + x] ^= 1; },
     plotBarGraph: (value, high) => {
       const h = high || 1;
       const rows = Math.max(0, Math.min(5, Math.round(value / h * 5)));
       const out = new Array(25).fill("0");
       for (let r = 0; r < rows; r++) for (let c = 0; c < 5; c++) out[(4 - r) * 5 + c] = "1";
-      setScreen(out.join("")); say("bar graph " + value + " of " + h);
+      setScreen(m, out.join("")); sayd("bar graph " + value + " of " + h);
     }
   };
   const music = {
-    play: async (what, mode) => { say("sound: " + what); await wait(mode === 1 ? 0 : 500); },
-    playTone: async (f, ms) => { say("tone " + Math.round(f) + " Hz"); await wait(ms); },
-    ringTone: (f) => say("tone " + Math.round(f) + " Hz"),
-    rest: async (ms) => { await wait(ms); },
+    play: async (what, mode) => { sayd("sound: " + what); await wait(m, mode === 1 ? 0 : 500); },
+    playTone: async (f, ms) => { sayd("tone " + Math.round(f) + " Hz"); await wait(m, ms); },
+    ringTone: (f) => sayd("tone " + Math.round(f) + " Hz"),
+    rest: async (ms) => { await wait(m, ms); },
     builtinPlayableSoundEffect: (s) => String(s),
     tonePlayable: (n, b) => String(n),
     beat: (b) => 250,
     setVolume: () => {}
   };
   const radio = {
-    setGroup: (g) => say("radio group " + g),
-    sendNumber: (n) => say("radio sent number " + n),
-    sendString: (s) => say("radio sent \"" + s + "\""),
-    sendValue: (k, v) => say("radio sent " + k + "=" + v),
-    onReceivedNumber: () => say("note: radio receiving is not simulated yet"),
-    onReceivedString: () => say("note: radio receiving is not simulated yet"),
-    receivedPacket: () => -60,
-    setTransmitPower: () => {}
+    setGroup: (g) => { m.radioGroup = g; sayd("radio group " + g); },
+    sendNumber: (n) => { sayd("radio sent " + n); radioSend(m, "number", n); },
+    sendString: (t) => { sayd("radio sent \"" + t + "\""); radioSend(m, "string", String(t)); },
+    sendValue: (k, v) => { sayd("radio sent " + k + "=" + v); radioSend(m, "value", v, String(k)); },
+    onReceivedNumber: (cb) => { m.handlers.radioNumber = cb; },
+    onReceivedString: (cb) => { m.handlers.radioString = cb; },
+    onReceivedValue: (cb) => { m.handlers.radioValue = cb; },
+    receivedPacket: () => signalStrength(m),
+    setTransmitPower: () => { },
+    setTransmitSerialNumber: () => { }
   };
   /* ====================================================================
      Every block in the 4tronix Bit:Bot extension (v2.1.9), behaving the
      way the real one does - including refusing to work when the block
-     belongs to a model you have not got.
+     belongs to a model you have not got, or when nothing is plugged in.
      ==================================================================== */
   const sign = d => (d === "REV" ? -1 : 1);
   const armRange = arm => arm === "L" ? [0, 6] : arm === "R" ? [6, 12] : [0, 12];
-  const stopWheel = m => { if (m === "L") world.bot.lm = 0; else if (m === "R") world.bot.rm = 0;
-                           else { world.bot.lm = 0; world.bot.rm = 0; } };
-  const setWheels = (l, r) => { world.bot.lm = l; world.bot.rm = r; };
+  const stopWheel = w => { if (w === "L") b.lm = 0; else if (w === "R") b.rm = 0; else { b.lm = 0; b.rm = 0; } };
+  const setWheels = (l, r) => { b.lm = l; b.rm = r; };
   const addon = (group, name) =>
-    once("addon:" + group, "note: " + name + " needs the " + group + " add-on, which the gym has not got");
+    once(m, "addon:" + group, "note: " + name + " needs the " + group + " add-on, which the gym has not got");
 
   const bitbot = {
 
     /* ---------------- which robot ---------------- */
-    select_model: (m) => { world.model = (m === "Auto" ? "XL" : m); say("Bit:Bot model: " + world.model); },
-    getModel: () => world.model,
-    BBModels: (m) => m,
-    getVersionCode: () => world.model === "PRO" ? 16 : world.model === "XL" ? 9 : 0,
-    getFirmwareCode: () => proOnly("getFirmwareCode") ? 0 : 11,
+    select_model: (mod) => { b.model = (mod === "Auto" ? "XL" : mod); sayd("Bit:Bot model: " + b.model); },
+    getModel: () => b.model,
+    BBModels: (mod) => mod,
+    getVersionCode: () => b.model === "PRO" ? 16 : b.model === "XL" ? 9 : 0,
+    getFirmwareCode: () => proOnly(m, b, "getFirmwareCode") ? 0 : 11,
     bbEnableBluetooth: () => { },
 
     /* ---------------- driving, the 0 to 100 blocks ---------------- */
     go: (dir, speed) => {
-      world.bot.brake = false;
+      b.brake = false;
       const s = sign(dir) * clamp(speed, -100, 100);
       setWheels(s, s);
-      say((sign(dir) < 0 ? "reverse" : "forward") + " at " + speed + "%" +
-          (wheelSpeed(speed) === 0 ? "  (too slow to move)" : ""));
+      sayd((sign(dir) < 0 ? "reverse" : "forward") + " at " + speed + "%" +
+          (wheelSpeed(b, speed) === 0 ? "  (too slow to move)" : ""));
     },
-    goms: async (dir, speed, ms) => { bitbot.go(dir, speed); await wait(ms); bitbot.stop("brake"); },
+    goms: async (dir, speed, ms) => { bitbot.go(dir, speed); await wait(m, ms); bitbot.stop("brake"); },
     rotate: (dir, speed) => {
-      world.bot.brake = false;
+      b.brake = false;
       const s = clamp(speed, 0, 100);
       setWheels(dir === "R" ? s : -s, dir === "R" ? -s : s);
-      say("turn " + (dir === "R" ? "right" : "left") + " at " + speed + "%");
+      sayd("turn " + (dir === "R" ? "right" : "left") + " at " + speed + "%");
     },
-    rotatems: async (dir, speed, ms) => { bitbot.rotate(dir, speed); await wait(ms); bitbot.stop("brake"); },
+    rotatems: async (dir, speed, ms) => { bitbot.rotate(dir, speed); await wait(m, ms); bitbot.stop("brake"); },
     stop: (mode) => {
       stopWheel("B");
-      world.bot.brake = (mode !== "coast");
-      if (mode === "coast") once("coast", "note: coasting - the robot rolls on until friction stops it");
+      b.brake = (mode !== "coast");
+      if (mode === "coast") once(m, "coast", "note: coasting - the robot rolls on until friction stops it");
     },
     move: (motor, dir, speed) => {
-      world.bot.brake = false;
+      b.brake = false;
       const s = sign(dir) * clamp(speed, -100, 100);
-      if (motor === "L") world.bot.lm = s; else if (motor === "R") world.bot.rm = s; else setWheels(s, s);
-      say((motor === "L" ? "left motor " : motor === "R" ? "right motor " : "both motors ") +
+      if (motor === "L") b.lm = s; else if (motor === "R") b.rm = s; else setWheels(s, s);
+      sayd((motor === "L" ? "left motor " : motor === "R" ? "right motor " : "both motors ") +
           (sign(dir) < 0 ? "reverse" : "forward") + " at " + speed + "%" +
-          (wheelSpeed(speed) === 0 ? "  (too slow to move)" : ""));
+          (wheelSpeed(b, speed) === 0 ? "  (too slow to move)" : ""));
     },
-    movems: async (motor, dir, speed, ms) => { bitbot.move(motor, dir, speed); await wait(ms); stopWheel(motor); },
+    movems: async (motor, dir, speed, ms) => { bitbot.move(motor, dir, speed); await wait(m, ms); stopWheel(motor); },
     BBBias: (dir, bias) => {
-      world.bias = { dir: dir, amount: clamp(bias, 0, 80) };
-      say("bias " + clamp(bias, 0, 80) + "% to the " + (dir === "R" ? "right" : "left"));
+      b.bias = { dir: dir, amount: clamp(bias, 0, 80) };
+      sayd("bias " + clamp(bias, 0, 80) + "% to the " + (dir === "R" ? "right" : "left"));
     },
 
     /* ---------------- driving, the old 0 to 1023 blocks ---------------- */
     motor: (m, speed) => {
       const pct = clamp(speed, -1023, 1023) / 1023 * 100;
-      if (m === "L") world.bot.lm = pct; else if (m === "R") world.bot.rm = pct; else setWheels(pct, pct);
-      once("scale1023", "note: motor, drive and driveTurn run on 0 to 1023, not 0 to 100");
-      say("motor " + (m === "L" ? "left" : m === "R" ? "right" : "both") + " at " + speed + " of 1023");
+      if (m === "L") b.lm = pct; else if (m === "R") b.rm = pct; else setWheels(pct, pct);
+      once(m, "scale1023", "note: motor, drive and driveTurn run on 0 to 1023, not 0 to 100");
+      sayd("motor " + (m === "L" ? "left" : m === "R" ? "right" : "both") + " at " + speed + " of 1023");
     },
     drive: (speed) => bitbot.motor("B", speed),
-    driveMilliseconds: async (speed, ms) => { bitbot.motor("B", speed); await wait(ms); stopWheel("B"); },
+    driveMilliseconds: async (speed, ms) => { bitbot.motor("B", speed); await wait(m, ms); stopWheel("B"); },
     driveTurn: (dir, speed) => {
       const s = Math.max(0, speed);
       bitbot.motor("L", dir === "L" ? -s : s);
       bitbot.motor("R", dir === "L" ? s : -s);
     },
-    driveTurnMilliseconds: async (dir, speed, ms) => { bitbot.driveTurn(dir, speed); await wait(ms); stopWheel("B"); },
+    driveTurnMilliseconds: async (dir, speed, ms) => { bitbot.driveTurn(dir, speed); await wait(m, ms); stopWheel("B"); },
 
     /* ---------------- driving by distance and angle: PRO only ---------------- */
     gocm: async (dir, speed, distance) => {
-      if (proOnly("gocm")) return;
+      if (proOnly(m, b, "gocm")) return;
       const v = wheelSpeed(clamp(speed, 0, 100));
       bitbot.go(dir, speed);
-      if (v > 0) await wait(Math.abs(distance) * 10 / v * 1000);
+      if (v > 0) await wait(m, Math.abs(distance) * 10 / v * 1000);
       bitbot.stop("brake");
     },
     spinDeg: async (dir, speed, angle) => {
-      if (proOnly("spinDeg")) return;
+      if (proOnly(m, b, "spinDeg")) return;
       const v = wheelSpeed(clamp(speed, 0, 100));
       bitbot.rotate(dir, speed);
-      if (v > 0) await wait(Math.abs(angle) * Math.PI / 180 / (2 * v / BOT.axle) * 1000);
+      if (v > 0) await wait(m, Math.abs(angle) * Math.PI / 180 / (2 * v / BOT.axle) * 1000);
       bitbot.stop("brake");
     },
     arc: (dir, speed, radius) => {
-      if (proOnly("arc")) return;
+      if (proOnly(m, b, "arc")) return;
       const R = Math.max(radius, 7) * 10;                      // the extension floors the radius at 7 cm
       const back = (dir === "RL" || dir === "RR") ? -1 : 1;
       const inner = speed * (R - BOT.axle / 2) / (R + BOT.axle / 2);
       const left = (dir === "FL" || dir === "RL") ? inner : speed;
       const right = (dir === "FL" || dir === "RL") ? speed : inner;
       setWheels(back * left, back * right);
-      say("arc " + dir + " at " + speed + "%, radius " + Math.max(radius, 7) + " cm");
+      sayd("arc " + dir + " at " + speed + "%, radius " + Math.max(radius, 7) + " cm");
     },
     arcdeg: async (dir, speed, radius, angle) => {
-      if (proOnly("arcdeg")) return;
+      if (proOnly(m, b, "arcdeg")) return;
       bitbot.arc(dir, speed, radius);
-      const R = Math.max(radius, 7) * 10, v = wheelSpeed(speed);
-      if (v > 0) await wait(Math.abs(angle) * Math.PI / 180 * R / v * 1000);
+      const R = Math.max(radius, 7) * 10, v = wheelSpeed(b, speed);
+      if (v > 0) await wait(m, Math.abs(angle) * Math.PI / 180 * R / v * 1000);
       bitbot.stop("brake");
     },
     steer: (direction, speed) => {
-      if (proOnly("steer")) return;
+      if (proOnly(m, b, "steer")) return;
       const d = clamp(direction, -100, 100), sp = clamp(speed, 0, 100);
       setWheels(d > 0 ? sp : (100 + d) * sp / 100, d < 0 ? sp : (100 - d) * sp / 100);
-      say("steer " + d + " at " + sp + "%");
+      sayd("steer " + d + " at " + sp + "%");
     },
 
     /* ---------------- wheel encoders: PRO only ---------------- */
-    enablePID: (on) => { if (!proOnly("enablePID")) say("PID " + (on ? "on" : "off")); },
+    enablePID: (on) => { if (!proOnly(m, b, "enablePID")) sayd("PID " + (on ? "on" : "off")); },
     wheelSensor: (sensor, unit) => {
-      if (proOnly("wheelSensor")) return 0;
-      const mm = Math.abs(sensor === "L" ? world.enc.l : world.enc.r);
+      if (proOnly(m, b, "wheelSensor")) return 0;
+      const mm = Math.abs(sensor === "L" ? b.enc.l : b.enc.r);
       if (unit === "mm") return Math.round(mm);
       if (unit === "cm") return Math.round(mm / 10);
       if (unit === "in") return Math.round(mm / 25.4);
       return Math.round(mm * 10.36);
     },
-    turnAngle: () => proOnly("turnAngle") ? 0
-      : Math.round((world.enc.l - world.enc.r) / BOT.axle * 180 / Math.PI),
+    turnAngle: () => proOnly(m, b, "turnAngle") ? 0
+      : Math.round((b.enc.l - b.enc.r) / BOT.axle * 180 / Math.PI),
     resetWheelSensors: (m) => {
-      if (m === "L") world.enc.l = 0; else if (m === "R") world.enc.r = 0; else { world.enc.l = 0; world.enc.r = 0; }
+      if (m === "L") b.enc.l = 0; else if (m === "R") b.enc.r = 0; else { b.enc.l = 0; b.enc.r = 0; }
     },
-    lastEncoderError: () => proOnly("lastEncoderError") ? 0 : 0,
-    motorTrim: () => proOnly("motorTrim"),
-    pidConstants: () => proOnly("pidConstants"),
-    carryForwardErrors: () => proOnly("carryForwardErrors"),
-    clearPidErrors: () => proOnly("clearPidErrors"),
-    stopThreshold: () => proOnly("stopThreshold"),
-    setStartPWM: () => proOnly("setStartPWM"),
+    lastEncoderError: () => proOnly(m, b, "lastEncoderError") ? 0 : 0,
+    motorTrim: () => proOnly(m, b, "motorTrim"),
+    pidConstants: () => proOnly(m, b, "pidConstants"),
+    carryForwardErrors: () => proOnly(m, b, "carryForwardErrors"),
+    clearPidErrors: () => proOnly(m, b, "clearPidErrors"),
+    stopThreshold: () => proOnly(m, b, "stopThreshold"),
+    setStartPWM: () => proOnly(m, b, "setStartPWM"),
 
     /* ---------------- the line sensors ---------------- */
-    readLine: (sensor) => readLineSensor(sensor),
+    readLine: (sensor) => readLineSensor(b, sensor),
     readLineDigital: (sensor) => {
       // the real extension returns false on anything that is not a PRO
-      if (world.model !== "PRO") {
-        once("rld", "note: read line digital always says false unless you have a PRO - use \"read line sensor\" on an XL", "err");
+      if (b.model !== "PRO") {
+        once(m, "rld", "note: read line digital always says false unless you have a PRO - use \"read line sensor\" on an XL", "err");
         return false;
       }
-      return readLineSensor(sensor) === 1;
+      return readLineSensor(b, sensor) === 1;
     },
     readLineAnalog: (sensor) => {
-      if (proOnly("readLineAnalog")) return 0;
-      return readLineSensor(sensor) ? 120 + Math.round(Math.random() * 60) : 820 + Math.round(Math.random() * 60);
+      if (proOnly(m, b, "readLineAnalog")) return 0;
+      return readLineSensor(b, sensor) ? 120 + Math.round(Math.random() * 60) : 820 + Math.round(Math.random() * 60);
     },
     mergeLinePosition: () => {
-      if (proOnly("mergeLinePosition")) return 0;
-      const l = readLineSensor("L"), r = readLineSensor("R"), c = readLineSensor("C");
+      if (proOnly(m, b, "mergeLinePosition")) return 0;
+      const l = readLineSensor(b, "L"), r = readLineSensor(b, "R"), c = readLineSensor(b, "C");
       if (!l && !r && !c) return 0;
       return Math.round(((r * 100 + c * 50) - (l * 100 + c * 50)) / Math.max(1, l + r + c));
     },
-    setThreshold: () => proOnly("setThreshold"),
-    calibrateLine: () => proOnly("calibrateLine"),
+    setThreshold: () => proOnly(m, b, "setThreshold"),
+    calibrateLine: () => proOnly(m, b, "calibrateLine"),
 
     /* ---------------- the other sensors ---------------- */
     readLight: (sensor) => readLightSensor(sensor),
     sonar: (unit) => {
-      const cm = readSonar();
-      if (cm === 0) once("sonar0", "note: nothing within 2 m, so sonar gives 0 - watch out for \"if sonar < 15\"");
+      const cm = readSonar(b);
+      if (cm === 0) once(m, "sonar0", "note: nothing within 2 m, so sonar gives 0 - watch out for \"if sonar < 15\"");
       if (unit === "in") return Math.round(cm / 2.54);
       if (unit === "us") return Math.round(cm * 59);
       return cm;
     },
-    batteryVoltage: () => proOnly("batteryVoltage") ? 0 : Math.round((4.85 + Math.random() * 0.2) * 100) / 100,
+    batteryVoltage: () => proOnly(m, b, "batteryVoltage") ? 0 : Math.round((4.85 + Math.random() * 0.2) * 100) / 100,
 
     /* ---------------- the lights along each arm ---------------- */
-    setLedColor: (rgb) => { world.pixels.fill(cssOf(rgb)); say("lights " + nameOfColour(rgb)); },
-    setPixelColor: (id, rgb) => { world.pixels[((id % 12) + 12) % 12] = cssOf(rgb); },
-    ledClear: () => world.pixels.fill(null),
-    ledBrightness: (b) => { world.pixelBright = clamp(b, 0, 255); },
+    setLedColor: (rgb) => { b.pixels.fill(cssOf(rgb)); sayd("lights " + nameOfColour(rgb)); },
+    setPixelColor: (id, rgb) => { b.pixels[((id % 12) + 12) % 12] = cssOf(rgb); },
+    ledClear: () => b.pixels.fill(null),
+    ledBrightness: (b) => { b.pixelBright = clamp(b, 0, 255); },
     ledRainbow: (dir, arm) => {
       const [a, b] = armRange(arm);
-      for (let i = a; i < b; i++) world.pixels[i] = "hsl(" + Math.round((i - a) * 300 / (b - a - 1 || 1)) + ",95%,55%)";
-      say("rainbow");
+      for (let i = a; i < b; i++) b.pixels[i] = "hsl(" + Math.round((i - a) * 300 / (b - a - 1 || 1)) + ",95%,55%)";
+      sayd("rainbow");
     },
     ledShift: (dir, arm) => {
-      const [a, b] = armRange(arm), slice = world.pixels.slice(a, b);
+      const [a, b] = armRange(arm), slice = b.pixels.slice(a, b);
       if (dir) { slice.pop(); slice.unshift(null); } else { slice.shift(); slice.push(null); }
-      for (let i = a; i < b; i++) world.pixels[i] = slice[i - a];
+      for (let i = a; i < b; i++) b.pixels[i] = slice[i - a];
     },
     ledRotate: (dir, arm) => {
-      const [a, b] = armRange(arm), slice = world.pixels.slice(a, b);
+      const [a, b] = armRange(arm), slice = b.pixels.slice(a, b);
       if (dir) slice.unshift(slice.pop()); else slice.push(slice.shift());
-      for (let i = a; i < b; i++) world.pixels[i] = slice[i - a];
+      for (let i = a; i < b; i++) b.pixels[i] = slice[i - a];
     },
     setUpdateMode: () => { },
     ledShow: () => { },
@@ -1089,9 +1192,9 @@ function makeApi() {
     convertRGB: (r, g, b) => (clamp(r, 0, 255) << 16) + (clamp(g, 0, 255) << 8) + clamp(b, 0, 255),
 
     /* ---------------- the buzzer ---------------- */
-    buzz: (flag) => say("buzzer " + (flag ? "on" : "off")),
-    buzzTime: async (ms) => { say("buzz for " + ms + " ms"); await wait(ms); },
-    setVolume: (v) => { if (!proOnly("setVolume")) say("buzzer volume " + v); },
+    buzz: (flag) => sayd("buzzer " + (flag ? "on" : "off")),
+    buzzTime: async (ms) => { sayd("buzz for " + ms + " ms"); await wait(m, ms); },
+    setVolume: (v) => { if (!proOnly(m, b, "setVolume")) sayd("buzzer volume " + v); },
 
     /* ---------------- things the gym has not got bolted on ---------------- */
     setTalon: () => addon("servo", "the talon"),
@@ -1101,9 +1204,9 @@ function makeApi() {
     bbServoTrim: () => addon("servo", "servo trim"),
     bbStopServos: () => addon("servo", "stop servos"),
 
-    onIREvent: () => { if (!proOnly("onIREvent")) addon("infra-red", "the IR remote"); },
-    irKey: () => { proOnly("irKey"); return false; },
-    lastIRCode: () => { proOnly("lastIRCode"); return 0; },
+    onIREvent: () => { if (!proOnly(m, b, "onIREvent")) addon("infra-red", "the IR remote"); },
+    irKey: () => { proOnly(m, b, "irKey"); return false; },
+    lastIRCode: () => { proOnly(m, b, "lastIRCode"); return 0; },
     irKeyCode: () => 0,
     onIREventAddon: () => addon("infra-red", "the IR remote"),
     irKeyAddon: () => { addon("infra-red", "the IR remote"); return false; },
@@ -1127,28 +1230,39 @@ function makeApi() {
     oledRectangle: () => addon("OLED", "the screen"),
 
     /* ---------------- the memory on the board ---------------- */
-    writeEEROM: () => once("eerom", "note: the gym has no EEROM to remember things in"),
-    wrEEROM: () => once("eerom", "note: the gym has no EEROM to remember things in"),
-    readEEROM: () => { once("eerom", "note: the gym has no EEROM to remember things in"); return 0; },
-    rdEEROM: () => { once("eerom", "note: the gym has no EEROM to remember things in"); return 0; },
+    writeEEROM: () => once(m, "eerom", "note: the gym has no EEROM to remember things in"),
+    wrEEROM: () => once(m, "eerom", "note: the gym has no EEROM to remember things in"),
+    readEEROM: () => { once(m, "eerom", "note: the gym has no EEROM to remember things in"); return 0; },
+    rdEEROM: () => { once(m, "eerom", "note: the gym has no EEROM to remember things in"); return 0; },
     loadCalibration: () => { }, saveCalibration: () => { },
     checkCalibration: () => 0
   };
-  const control = { waitMicros: async (us) => { await wait(us / 1000); }, inBackground: (cb) => foreverQueue.push(cb) };
+  const control = { waitMicros: async (us) => { await wait(m, us / 1000); }, inBackground: (cb) => m.foreverQueue.push(cb) };
   const pins = { analogReadPin: () => 0, digitalReadPin: () => 0, analogWritePin: () => {}, digitalWritePin: () => {} };
   const randint = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
 
   // anything the gym has not been taught yet reports itself instead of crashing
-  const forgiving = (name, obj) => new Proxy(obj, {
+  const forgiving = (name, obj, needsBot) => new Proxy(obj, {
     get(t, k) {
-      if (k in t || typeof k !== "string") return t[k];
-      return function () { say("note: " + name + "." + k + " is not simulated yet", "say"); return 0; };
+      if (typeof k !== "string") return t[k];
+      const f = k in t ? t[k] : null;
+      return function () {
+        if (needsBot) {
+          b = botOf(m);                         // it may have been plugged in since the last block
+          if (!b) {
+            once(m, "nobot", m.name + " is not plugged into a Bit:Bot, so " + name + "." + k + " does nothing", "err");
+            return 0;
+          }
+        }
+        if (!f) { sayd("note: " + name + "." + k + " is not simulated yet", "say"); return 0; }
+        return f.apply(t, arguments);
+      };
     }
   });
   return {
     basic: forgiving("basic", basic), input: forgiving("input", input),
     led: forgiving("led", led), music: forgiving("music", music),
-    radio: forgiving("radio", radio), bitbot: forgiving("bitbot", bitbot),
+    radio: forgiving("radio", radio), bitbot: forgiving("bitbot", bitbot, true),
     control: forgiving("control", control), pins: forgiving("pins", pins), randint
   };
 }
@@ -1182,45 +1296,37 @@ function prepare(src) {
   return s;
 }
 
-let foreverQueue = [];
+/* Each micro:bit runs its own program on the room's one clock. */
+async function runOne(m) {
+  m.token++;
+  const my = m.token;
+  m.foreverQueue = [];
+  m.noted = new Set();
+  m.handlers = {};
+  m.radioGroup = 0;
+  m.lastFrom = null;
+  setScreen(m, "0".repeat(25));
 
-async function runProgram() {
-  stopProgram(true);
-  token++;
-  const my = token;
-  running = true;
-  foreverQueue = [];
-  noted = new Set();
-  world.enc.l = world.enc.r = 0;
-  world.bias = { dir: null, amount: 0 };
-  log.innerHTML = "";
-  setScreen("0".repeat(25));
-  world.pixels.fill(null);
-  world.bot.lm = world.bot.rm = 0;
-  world.bot.vl = world.bot.vr = 0;
-  world.bot.brake = false;
-  world.batt = +el("s-batt").value;
-  world.trail.length = 0;
-  simTime = 0;
-
-  if (!el("src").value.trim()) {
-    say("nothing to run yet - build some blocks on the left, or open a .hex", "err");
-    running = false; return;
+  const b = botOf(m);
+  if (b) {
+    b.lm = b.rm = 0; b.vl = b.vr = 0; b.brake = false;
+    b.enc.l = b.enc.r = 0; b.bias = { dir: null, amount: 0 };
+    b.pixels.fill(null); b.trail.length = 0;
+    b.batt = +el("s-batt").value;
   }
-  const api = makeApi();
-  let body;
-  try {
-    body = prepare(document.getElementById("src").value);
-  } catch (e) { say("could not read the program: " + e.message, "err"); return; }
+  if (!m.code.trim()) return;
 
-  // e.g. a BBxxx enum from a newer extension: let it answer with the member name
-  const seen = new Set([...body.matchAll(/\b([A-Z][A-Za-z0-9_]*)\s*\./g)].map(m => m[1]));
+  let body;
+  try { body = prepare(m.code); }
+  catch (e) { say("could not read the program: " + e.message, "err", m); return; }
+
+  const seen = new Set([...body.matchAll(/\b([A-Z][A-Za-z0-9_]*)\s*\./g)].map(x => x[1]));
   const stubs = {}, stubNames = [];
   for (const n of seen) {
     if (n in ENUMS || n in window || n === "Math") continue;
     stubs[n] = new Proxy({}, { get: (_, k) => String(k) });
     stubNames.push(n);
-    say("note: " + n + " is not one the gym knows, using its names as they are", "say");
+    say("note: " + n + " is not one the gym knows, using its names as they are", "say", m);
   }
   const stubLine = stubNames.length ? "const {" + stubNames.join(",") + "} = __st;\n" : "";
 
@@ -1228,37 +1334,46 @@ async function runProgram() {
   try {
     fn = new Function("__ns", "__en", "__st", '"use strict";\n' +
       "const {basic,input,led,music,radio,bitbot,control,pins,randint} = __ns;\n" +
-      "const {" + Object.keys(ENUMS).join(",") + "} = __en;\n" +   // every enum the gym knows, no hand-kept list
+      "const {" + Object.keys(ENUMS).join(",") + "} = __en;\n" +
       "music.PlaybackMode = __en.PlaybackMode;\n" +
       stubLine +
       "const Math = Object.assign(Object.create(window.Math), {randomRange:(a,b)=>Math_randomRange(a,b)});\n" +
       "function Math_randomRange(a,b){return Math.floor(window.Math.random()*(b-a+1))+a;}\n" +
       "return (async () => {\n" + body + "\n})();");
-  } catch (e) {
-    say("that program has a syntax error: " + e.message, "err");
-    running = false; return;
-  }
+  } catch (e) { say("syntax error: " + e.message, "err", m); return; }
 
-  loop();
-  say("run", "say");
   try {
-    await fn(api, ENUMS, stubs);
+    await fn(makeApi(m), ENUMS, stubs);
   } catch (e) {
-    if (!(e instanceof Stopped)) { say(e.message, "err"); }
+    if (!(e instanceof Stopped)) say(e.message, "err", m);
     return;
   }
-  if (my !== token) return;
-  for (const cb of foreverQueue) {
-    (async () => {
-      while (my === token) { await cb(); await wait(20); }
-    })().catch(e => { if (!(e instanceof Stopped)) say(e.message, "err"); });
+  if (my !== m.token) return;
+  for (const cb of m.foreverQueue) {
+    (async () => { while (my === m.token) { await cb(); await wait(m, 20); } })()
+      .catch(e => { if (!(e instanceof Stopped)) say(e.message, "err", m); });
   }
-  if (!foreverQueue.length) say("program finished", "say");
 }
 
-function stopProgram(quiet) {
-  running = false; token++; killTimers(); foreverQueue = [];
-  world.bot.lm = world.bot.rm = 0;
+async function runAll() {
+  stopAll(true);
+  running = true;
+  simTime = 0;
+  log.innerHTML = "";
+  const live = world.mbits.filter(m => m.code.trim());
+  if (!live.length) {
+    say("nothing to run yet - build some blocks, or open a .hex", "err");
+    running = false; return;
+  }
+  loop();
+  say("run: " + live.map(m => m.name).join(", "), "say");
+  await Promise.all(live.map(m => runOne(m)));
+}
+
+function stopAll(quiet) {
+  running = false;
+  for (const m of world.mbits) { m.token++; killTimers(m); m.foreverQueue = []; }
+  for (const b of world.bots) { b.lm = b.rm = 0; b.brake = true; }
   if (!quiet) say("stopped", "say");
 }
 
@@ -1365,13 +1480,18 @@ function draw() {
     }
   }
 
-  // where the robot has been
-  if (world.showTrail && world.trail.length > 1) {
-    ctx.strokeStyle = "rgba(91,192,235,0.55)"; ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(world.trail[0].x * S, world.trail[0].y * S);
-    for (const pt of world.trail) ctx.lineTo(pt.x * S, pt.y * S);
-    ctx.stroke();
+  // where each robot has been, in the colour of the board driving it
+  if (world.showTrail) {
+    for (const b of world.bots) {
+      if (b.trail.length < 2) continue;
+      const host = hostOf(b);
+      ctx.strokeStyle = (host ? host.colour : "#8d96a6") + "99";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(b.trail[0].x * S, b.trail[0].y * S);
+      for (const pt of b.trail) ctx.lineTo(pt.x * S, pt.y * S);
+      ctx.stroke();
+    }
   }
 
   // the ceiling lamp, seen from below
@@ -1388,7 +1508,8 @@ function draw() {
   ctx.fill();
   ctx.strokeStyle = world.lights.torch ? "#6b5a2a" : "#5a5a4a"; ctx.lineWidth = 2; ctx.stroke();
 
-  drawBot();
+  for (const b of world.bots) drawBot(b);
+  for (const m of world.mbits) if (!botOf(m)) drawBoard(m);
 
   // which way is north
   const nx = cv.width - 46 * (cv.width / 1100), ny = 46 * (cv.width / 1100), nr = 20 * (cv.width / 1100);
@@ -1416,45 +1537,65 @@ function draw() {
   }
 }
 
-function drawBot() {
-  const b = world.bot;
+// a micro:bit nobody has plugged in: a board on the floor, still listening
+function drawBoard(m) {
+  const w = 62 * S, h = 50 * S, x = m.x * S, y = m.y * S;
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 8 * S; ctx.shadowOffsetY = 2 * S;
+  ctx.fillStyle = "#1f6f4a";
+  roundRect(x - w / 2, y - h / 2, w, h, 4 * S); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = m.colour; ctx.lineWidth = 2;
+  roundRect(x - w / 2, y - h / 2, w, h, 4 * S); ctx.stroke();
+  const cell = h * 0.17;
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+    ctx.fillStyle = m.screen[r * 5 + c] ? "#ff3b3b" : "#2b2f38";
+    ctx.fillRect(x + (c - 2.5) * cell, y + (r - 2.5) * cell, cell * 0.72, cell * 0.72);
+  }
+  ctx.fillStyle = m.colour;
+  ctx.font = "bold " + Math.round(11 * (cv.width / 1100)) + "px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(m.name, x, y - h / 2 - 5);
+  ctx.textAlign = "left";
+}
+
+function drawBot(b) {
+  const host = hostOf(b);
+  const accent = host ? host.colour : "#8d96a6";
   ctx.save();
   ctx.translate(b.x * S, b.y * S);
   ctx.rotate(b.h);
 
   const L = 120 * S, W = 125 * S;
-  // wheels
   ctx.fillStyle = "#15181f";
   ctx.fillRect(-L * 0.18, -W / 2 - 4 * S, L * 0.42, 14 * S);
   ctx.fillRect(-L * 0.18, W / 2 - 10 * S, L * 0.42, 14 * S);
 
-  // body
-  ctx.fillStyle = "#c8ced9"; ctx.strokeStyle = "#8d96a6"; ctx.lineWidth = 2;
+  ctx.fillStyle = "#c8ced9"; ctx.strokeStyle = accent; ctx.lineWidth = 2.5;
   roundRect(-L / 2, -W / 2, L, W, 9 * S); ctx.fill(); ctx.stroke();
 
-  // neopixels, six down each side
   for (let i = 0; i < 12; i++) {
-    const side = i < 6 ? -1 : 1;
-    const k = i % 6;
+    const side = i < 6 ? -1 : 1, k = i % 6;
     const px = -L / 2 + 12 * S + k * (L - 26 * S) / 5;
     const py = side * (W / 2 - 9 * S);
     ctx.beginPath(); ctx.arc(px, py, 4.2 * S, 0, 7);
-    const c = world.pixels[i];
+    const c = b.pixels[i];
     if (c && c !== "#000000") {
-      ctx.fillStyle = c; ctx.globalAlpha = Math.max(0.25, world.pixelBright / 255); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = c; ctx.globalAlpha = Math.max(0.25, b.pixelBright / 255); ctx.fill(); ctx.globalAlpha = 1;
       ctx.shadowColor = c; ctx.shadowBlur = 10; ctx.fill(); ctx.shadowBlur = 0;
     } else { ctx.fillStyle = "#8d96a6"; ctx.fill(); }
   }
 
-  // the micro:bit riding on top
-  ctx.fillStyle = "#1f6f4a"; roundRect(-L * 0.17, -W * 0.22, L * 0.34, W * 0.44, 3 * S); ctx.fill();
-  // the top row of the icon faces the way the robot is going
-  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
-    ctx.fillStyle = world.screen[r * 5 + c] ? "#ff3b3b" : "#2b2f38";
-    ctx.fillRect(L * 0.08 - r * L * 0.05, -W * 0.15 + c * W * 0.06, L * 0.032, W * 0.04);
+  // the micro:bit riding on top, if one is plugged in
+  ctx.fillStyle = host ? "#1f6f4a" : "#49536a";
+  roundRect(-L * 0.17, -W * 0.22, L * 0.34, W * 0.44, 3 * S); ctx.fill();
+  if (host) {
+    for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+      ctx.fillStyle = host.screen[r * 5 + c] ? "#ff3b3b" : "#2b2f38";
+      ctx.fillRect(L * 0.08 - r * L * 0.05, -W * 0.15 + c * W * 0.06, L * 0.032, W * 0.04);
+    }
   }
 
-  // which way is forward, and where the light sensors look
   ctx.beginPath(); ctx.moveTo(L / 2, 0); ctx.lineTo(L / 2 - 9 * S, -7 * S); ctx.lineTo(L / 2 - 9 * S, 7 * S);
   ctx.closePath(); ctx.fillStyle = "#e8575a"; ctx.fill();
   for (const side of [-1, 1]) {
@@ -1463,7 +1604,14 @@ function drawBot() {
     ctx.fillStyle = "#ffe08a"; ctx.fill();
   }
   ctx.restore();
+
+  ctx.fillStyle = accent;
+  ctx.font = "bold " + Math.round(11 * (cv.width / 1100)) + "px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(host ? host.name : b.name, b.x * S, (b.y - 72) * S);
+  ctx.textAlign = "left";
 }
+
 function roundRect(x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
@@ -1475,32 +1623,78 @@ function roundRect(x, y, w, h, r) {
    ======================================================================== */
 const el = id => document.getElementById(id);
 function instruments() {
-  for (let i = 0; i < 25; i++) screenEls[i].classList.toggle("on", !!world.screen[i]);
+  const m = mbit(), b = botOf(m);
+  for (let i = 0; i < 25; i++) screenEls[i].classList.toggle("on", !!(m && m.screen[i]));
   const pix = el("pix").children;
   for (let i = 0; i < 12; i++) {
-    const c = world.pixels[i];
+    const c = b ? b.pixels[i] : null;
     pix[i].style.background = c && c !== "#000000" ? c : "#2a2f3c";
     pix[i].style.boxShadow = c && c !== "#000000" ? "0 0 7px " + c : "none";
   }
-  const ll = readLightSensor("L"), lr = readLightSensor("R");
-  el("r-ll").textContent = ll; el("r-lr").textContent = lr;
+  const dash = "\u2014";
+  const ll = b ? readLightSensor(b, "L") : 0, lr = b ? readLightSensor(b, "R") : 0;
+  el("r-ll").textContent = b ? ll : dash;
+  el("r-lr").textContent = b ? lr : dash;
   el("b-ll").style.width = (ll / 1023 * 100) + "%";
   el("b-lr").style.width = (lr / 1023 * 100) + "%";
-  el("r-lv").textContent = readScreenLight();
-  el("r-line").textContent = readLineSensor("L") + " / " + readLineSensor("R");
-  el("r-son").textContent = readSonar() + " cm";
-  el("r-comp").textContent = compassHeadingDeg() + "\u00b0";
-  el("r-mag").textContent = magneticForce("x").toFixed(1) + " / " + magneticForce("y").toFixed(1) +
-                            " / " + magneticForce("z").toFixed(0) + " \u00b5T";
-  el("r-mot").textContent = Math.round(world.bot.lm) + " / " + Math.round(world.bot.rm);
-  const sp = (world.bot.vl + world.bot.vr) / 2;
-  el("r-spd").textContent = Math.round(sp) + " mm/s" + (slipping ? "  slip!" : "");
-  el("r-batt").textContent = Math.round(world.batt) + "%";
-  el("v-batt").textContent = Math.round(world.batt);
+  el("r-lv").textContent = m ? readScreenLight(m) : dash;
+  el("r-line").textContent = b ? readLineSensor(b, "L") + " / " + readLineSensor(b, "R") : dash;
+  el("r-son").textContent = b ? readSonar(b) + " cm" : dash;
+  el("r-comp").textContent = m ? compassHeadingDeg(m) + "\u00b0" : dash;
+  el("r-mag").textContent = m ? magneticForce(m, "x").toFixed(1) + " / " + magneticForce(m, "y").toFixed(1) +
+                                " / " + magneticForce(m, "z").toFixed(0) + " \u00b5T" : dash;
+  el("r-mot").textContent = b ? Math.round(b.lm) + " / " + Math.round(b.rm) : dash;
+  const sp = b ? (b.vl + b.vr) / 2 : 0;
+  el("r-spd").textContent = b ? Math.round(sp) + " mm/s" + (slipping ? "  slip!" : "") : dash;
+  el("r-batt").textContent = b ? Math.round(b.batt) + "%" : dash;
+  if (b) el("v-batt").textContent = Math.round(b.batt);
   const vS = Math.abs(sp) / 1000;
   el("r-forces").textContent = (PHYS.airOn ? PHYS.dragK * vS * vS : 0).toFixed(4) + " / " +
                                (PHYS.roll * PHYS.mass * G).toFixed(3) + " N";
   el("clock").textContent = (simTime / 1000).toFixed(1) + " s";
+  el("mbName").textContent = m ? m.name : dash;
+  if (m) el("mbName").style.color = m.colour;
+}
+
+/* ---- the strip of boards and bodies, and which goes in which ---- */
+function renderDevices() {
+  const strip = el("devices");
+  strip.innerHTML = "";
+  world.mbits.forEach((m, i) => {
+    const b = botOf(m);
+    const chip = document.createElement("button");
+    chip.className = "chip" + (i === world.sel ? " on" : "");
+    chip.style.borderColor = m.colour;
+    if (i === world.sel) chip.style.background = m.colour + "33";
+    chip.innerHTML = '<i style="background:' + m.colour + '"></i>' + m.name +
+                     (b ? ' <span>in ' + b.name + '</span>' : ' <span>in hand</span>');
+    chip.addEventListener("click", () => selectDevice(i));
+    strip.appendChild(chip);
+  });
+  const sel = el("plugSel");
+  sel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = ""; none.textContent = "in hand (no Bit:Bot)";
+  sel.appendChild(none);
+  for (const b of world.bots) {
+    const taken = hostOf(b);
+    const o = document.createElement("option");
+    o.value = String(b.id);
+    o.textContent = b.name + (taken && taken !== mbit() ? " - " + taken.name + " is in it" : "");
+    sel.appendChild(o);
+  }
+  const mine = botOf(mbit());
+  sel.value = mine ? String(mine.id) : "";
+  el("addMbit").disabled = world.mbits.length >= MAX_MICROBITS;
+  el("addBot").disabled = world.bots.length >= MAX_BOTS;
+  el("delDev").disabled = world.mbits.length <= 1;
+}
+
+function selectDevice(i) {
+  if (i === world.sel) return;
+  world.sel = i;
+  renderDevices(); instruments(); draw();
+  showProjectOf(mbit());
 }
 
 /* ========================================================================
@@ -1516,10 +1710,15 @@ cv.addEventListener("pointerdown", ev => {
   cv.setPointerCapture(ev.pointerId);
   const p = canvasToMm(ev);
   if (tool === "pen" || tool === "erase") { dragging = { kind: tool, last: p }; paint(p, p); return; }
-  const b = world.bot;
-  const nose = { x: b.x + Math.cos(b.h) * 75, y: b.y + Math.sin(b.h) * 75 };
-  if (Math.hypot(p.x - nose.x, p.y - nose.y) < 45) { dragging = { kind: "spin" }; return; }
-  if (Math.hypot(p.x - b.x, p.y - b.y) < BOT.radius + 10) { dragging = { kind: "bot" }; return; }
+  for (const b of world.bots) {
+    const nose = { x: b.x + Math.cos(b.h) * 75, y: b.y + Math.sin(b.h) * 75 };
+    if (Math.hypot(p.x - nose.x, p.y - nose.y) < 45) { dragging = { kind: "spin", bot: b }; return; }
+    if (Math.hypot(p.x - b.x, p.y - b.y) < BOT.radius + 10) { dragging = { kind: "bot", bot: b }; return; }
+  }
+  for (const m of world.mbits) {
+    if (botOf(m)) continue;
+    if (Math.abs(p.x - m.x) < 40 && Math.abs(p.y - m.y) < 34) { dragging = { kind: "board", m: m }; return; }
+  }
   if (Math.hypot(p.x - world.lights.tx, p.y - world.lights.ty) < 70) { dragging = { kind: "torch" }; return; }
   for (let i = world.boxes.length - 1; i >= 0; i--) {
     const bx = world.boxes[i];
@@ -1533,8 +1732,9 @@ cv.addEventListener("pointermove", ev => {
   const p = canvasToMm(ev);
   if (dragging.kind === "pen" || dragging.kind === "erase") { paint(dragging.last, p); dragging.last = p; }
   else if (dragging.kind === "torch") { world.lights.tx = p.x; world.lights.ty = p.y; }
-  else if (dragging.kind === "bot") { world.bot.x = p.x; world.bot.y = p.y; world.trail.length = 0; }
-  else if (dragging.kind === "spin") { world.bot.h = Math.atan2(p.y - world.bot.y, p.x - world.bot.x); }
+  else if (dragging.kind === "bot") { dragging.bot.x = p.x; dragging.bot.y = p.y; dragging.bot.trail.length = 0; }
+  else if (dragging.kind === "spin") { dragging.bot.h = Math.atan2(p.y - dragging.bot.y, p.x - dragging.bot.x); }
+  else if (dragging.kind === "board") { dragging.m.x = p.x; dragging.m.y = p.y; }
   else if (dragging.kind === "box") { dragging.box.x = p.x - dragging.dx; dragging.box.y = p.y - dragging.dy; }
   if (!running) { draw(); instruments(); }
 });
@@ -1577,26 +1777,27 @@ el("addBox").addEventListener("click", () => {
 el("furnish").addEventListener("click", () => { furnish(); draw(); instruments(); });
 el("clearBoxes").addEventListener("click", () => { world.boxes.length = 0; draw(); instruments(); });
 el("trailBtn").addEventListener("click", e => {
-  world.showTrail = !world.showTrail; world.trail.length = 0;
+  world.showTrail = !world.showTrail;
+  for (const b of world.bots) b.trail.length = 0;
   e.target.classList.toggle("on", world.showTrail); draw();
 });
-el("resetBot").addEventListener("click", () => {
-  world.bot.x = 1000; world.bot.y = 1500; world.bot.h = -Math.PI / 2;
-  world.bot.lm = world.bot.rm = 0; world.bot.vl = world.bot.vr = 0;
-  world.trail.length = 0; draw(); instruments();
-});
-document.querySelectorAll("[data-press]").forEach(b => b.addEventListener("click", () => {
-  const k = b.dataset.press, cb = handlers[k];
-  if (!cb) { say("nothing is listening for " + k, "say"); return; }
-  say("pressed " + k, "say");
-  Promise.resolve(cb()).catch(e => { if (!(e instanceof Stopped)) say(e.message, "err"); });
+el("resetBot").addEventListener("click", () => { placeEveryone(); draw(); instruments(); });
+document.querySelectorAll("[data-press]").forEach(btn => btn.addEventListener("click", () => {
+  const m = mbit(), k = btn.dataset.press, cb = m && m.handlers[k];
+  if (!cb) { say("nothing is listening for " + k, "say", m); return; }
+  say("pressed " + k, "say", m);
+  Promise.resolve(cb()).catch(e => { if (!(e instanceof Stopped)) say(e.message, "err", m); });
 }));
 el("s-top").addEventListener("input", e => { cfg.top = +e.target.value; el("v-top").textContent = cfg.top; });
 el("s-dead").addEventListener("input", e => { cfg.dead = +e.target.value; el("v-dead").textContent = cfg.dead; });
 el("s-torch").addEventListener("input", e => { cfg.torch = +e.target.value; el("v-torch").textContent = cfg.torch; if (!running) { draw(); instruments(); } });
 el("s-grip").addEventListener("input", e => { PHYS.tyreGrip = +e.target.value; el("v-grip").textContent = (+e.target.value).toFixed(2); });
 el("s-mis").addEventListener("input", e => { PHYS.mismatch = +e.target.value; el("v-mis").textContent = e.target.value; });
-el("s-batt").addEventListener("input", e => { world.batt = +e.target.value; el("v-batt").textContent = e.target.value; });
+el("s-batt").addEventListener("input", e => {
+  const b = botOf(mbit());
+  if (b) b.batt = +e.target.value;
+  el("v-batt").textContent = e.target.value;
+});
 el("air").addEventListener("change", e => { PHYS.airOn = e.target.checked; });
 document.querySelectorAll("[data-floor]").forEach(btn => btn.addEventListener("click", () => {
   const f = FLOORS[btn.dataset.floor];
@@ -1618,8 +1819,8 @@ el("wide").addEventListener("click", e => {
   e.target.classList.toggle("on", on);
   e.target.textContent = on ? "Normal size" : "Big blocks";
 });
-el("run").addEventListener("click", runProgram);
-el("stopBtn").addEventListener("click", () => stopProgram(false));
+el("run").addEventListener("click", runAll);
+el("stopBtn").addEventListener("click", () => stopAll(false));
 
 /* ========================================================================
    10. Programs to start from - the real ones, copied out of MakeCode
@@ -1632,10 +1833,10 @@ el("stopBtn").addEventListener("click", () => stopProgram(false));
 const EDITOR_URL = "https://makecode.microbit.org/?controller=1&nocookiebanner=1";
 const STORE_KEY = "bitbot-gym-project";
 
-function starterProject() {
+function starterProject(name) {
   const now = Math.round(Date.now() / 1000);
   const pxt = {
-    name: "Bit:Bot Gym",
+    name: name || "Bit:Bot Gym",
     description: "micro:bit and Bit:Bot XL blocks",
     dependencies: {
       core: "*", radio: "*", microphone: "*",
@@ -1646,7 +1847,7 @@ function starterProject() {
   };
   return {
     header: {
-      id: "bitbot-gym", name: "Bit:Bot Gym", meta: {}, editor: "blocksprj",
+      id: "gym-" + (name || "start") + "-" + now, name: name || "Bit:Bot Gym", meta: {}, editor: "blocksprj",
       pubId: "", pubCurrent: false, target: "microbit", targetVersion: "9.0.12",
       recentUse: now, modificationTime: now, path: "bitbot-gym", isDeleted: false
     },
@@ -1659,8 +1860,15 @@ function starterProject() {
   };
 }
 
-let savedProject = null, editorFrame = null, pendingPull = null, msgId = 0, pendingImport = null, tidied = false;
-try { savedProject = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { }
+let editorFrame = null, pendingPull = null, msgId = 0, pendingImport = null, tidied = false;
+
+// show this board's blocks in the editor
+function showProjectOf(m) {
+  if (!m) return;
+  const project = m.project || starterProject(m.name);
+  if (editorFrame) sendToEditor("importproject", { project: project });
+  else pendingImport = project;
+}
 
 function startEditor() {
   if (editorFrame) return;
@@ -1688,7 +1896,8 @@ window.addEventListener("message", ev => {
 
   if (msg.action === "workspacesync") {
     // the editor is asking what projects it has; hand it the one we want it to open
-    const give = pendingImport || savedProject || starterProject();
+    const m0 = mbit();
+    const give = pendingImport || (m0 && m0.project) || starterProject(m0 ? m0.name : null);
     msg.projects = [give];
     try { ev.source.postMessage(msg, "*"); } catch (e) { }
     say(pendingImport ? "gave MakeCode the program from the .hex" : "gave MakeCode the Bit:Bot project", "say");
@@ -1700,13 +1909,16 @@ window.addEventListener("message", ev => {
     return;
   }
   if (msg.action === "workspacesave" && msg.project) {
-    savedProject = msg.project;
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(savedProject)); } catch (e) { }
-    const ts = (msg.project.text || {})["main.ts"];
-    if (typeof ts === "string" && ts.trim()) {
-      el("src").value = ts;
-      if (pendingPull) { const f = pendingPull; pendingPull = null; f(ts); }
-      else say("took the code from your blocks", "say");
+    const m0 = mbit();
+    if (m0) {
+      m0.project = msg.project;
+      const ts = (msg.project.text || {})["main.ts"];
+      if (typeof ts === "string") {
+        m0.code = ts;
+        if (pendingPull) { const f = pendingPull; pendingPull = null; f(ts); }
+        else if (ts.trim()) say("took the code from your blocks", "say", m0);
+      }
+      saveAll();
     }
     return;
   }
@@ -1717,19 +1929,85 @@ window.addEventListener("message", ev => {
 
 async function pullCode() {
   if (!editorFrame) { startEditor(); return; }
-  const ts = await new Promise(res => {
+  await new Promise(res => {
     pendingPull = res;
     sendToEditor("saveproject");
-    setTimeout(() => { if (pendingPull === res) { pendingPull = null; res(null); } }, 5000);
+    setTimeout(() => { if (pendingPull === res) { pendingPull = null; res(null); } }, 4000);
   });
-  if (!ts) {
-    const cached = savedProject && savedProject.text && savedProject.text["main.ts"];
-    if (cached && cached.trim()) { el("src").value = cached; say("used the last code MakeCode saved", "say"); }
-    else { say("MakeCode has not given us any code yet - put a block in and try again", "err"); return; }
-  }
-  runProgram();
+  runAll();
+}
+
+/* remember the whole bench between visits */
+function saveAll() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      mbits: world.mbits.map(m => ({ name: m.name, colour: m.colour, x: m.x, y: m.y,
+                                     code: m.code, project: m.project, bot: (botOf(m) || {}).name || null })),
+      bots: world.bots.map(b => ({ name: b.name, x: b.x, y: b.y }))
+    }));
+  } catch (e) { /* a full or blocked store is not worth a crash */ }
+}
+function loadAll() {
+  let data = null;
+  try { data = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { }
+  if (!data || !data.mbits || !data.mbits.length) return false;
+  world.bots = (data.bots || []).map(b => makeBot(b.name, b.x, b.y));
+  world.mbits = data.mbits.map((d, i) => {
+    const m = makeMicrobit(d.name, d.colour || COLOURS[i % COLOURS.length], d.x, d.y);
+    m.code = d.code || ""; m.project = d.project || null;
+    const b = world.bots.find(x => x.name === d.bot);
+    if (b) b.host = m.id;
+    return m;
+  });
+  return true;
 }
 el("pullCode").addEventListener("click", pullCode);
+
+function placeEveryone() {
+  world.bots.forEach((b, i) => {
+    const n = Math.max(1, world.bots.length);
+    b.x = ROOM * (i + 1) / (n + 1); b.y = 1500; b.h = -Math.PI / 2;
+    b.lm = b.rm = b.vl = b.vr = 0; b.trail.length = 0;
+  });
+  const loose = world.mbits.filter(m => !botOf(m));
+  loose.forEach((m, i) => { m.x = 220 + (i % 5) * 150; m.y = 150 + Math.floor(i / 5) * 120; });
+}
+
+el("addMbit").addEventListener("click", () => {
+  if (world.mbits.length >= MAX_MICROBITS) return;
+  const n = world.mbits.length;
+  world.mbits.push(makeMicrobit(String.fromCharCode(65 + n), COLOURS[n % COLOURS.length], 0, 0));
+  world.sel = world.mbits.length - 1;
+  placeEveryone(); renderDevices(); showProjectOf(mbit()); draw(); instruments(); saveAll();
+});
+el("addBot").addEventListener("click", () => {
+  if (world.bots.length >= MAX_BOTS) return;
+  world.bots.push(makeBot("Bot " + (world.bots.length + 1), 1000, 1500));
+  placeEveryone(); renderDevices(); draw(); instruments(); saveAll();
+});
+el("delDev").addEventListener("click", () => {
+  if (world.mbits.length <= 1) return;
+  const m = mbit(), b = botOf(m);
+  if (b) b.host = null;
+  world.mbits.splice(world.sel, 1);
+  world.sel = Math.max(0, world.sel - 1);
+  placeEveryone(); renderDevices(); showProjectOf(mbit()); draw(); instruments(); saveAll();
+});
+el("plugSel").addEventListener("change", e => {
+  const m = mbit();
+  const old = botOf(m);
+  if (old) old.host = null;
+  const b = world.bots.find(x => x.id === +e.target.value);
+  if (b) {
+    const prev = hostOf(b);
+    if (prev) { prev.x = 300; prev.y = 300; }
+    b.host = m.id;
+    say(m.name + " plugged into " + b.name, "say", m);
+  } else {
+    say(m.name + " taken out, held in hand", "say", m);
+  }
+  placeEveryone(); renderDevices(); draw(); instruments(); saveAll();
+});
 
 /* ========================================================================
    12. Opening a .hex. A MakeCode hex carries the project inside it: records
@@ -1793,8 +2071,9 @@ async function openHex(file) {
 
   const ts = files["main.ts"];
   if (typeof ts !== "string") { say("that project has no main.ts to run", "err"); return; }
-  el("src").value = ts;
-  say("loaded \"" + (meta.name || file.name) + "\"", "say");
+  const target = mbit();
+  target.code = ts;
+  say("loaded \"" + (meta.name || file.name) + "\" onto " + target.name, "say", target);
 
   // warn about anything bolted on that the gym has never heard of
   try {
@@ -1813,13 +2092,14 @@ async function openHex(file) {
               path: "hex-" + now, isDeleted: false },
     text: files
   };
+  target.project = project;
+  saveAll();
   if (editorFrame) {
     sendToEditor("importproject", { project: project });
-    say("sent the blocks to the editor", "say");
+    say("sent the blocks to the editor", "say", target);
   } else {
-    pendingImport = project;                 // the editor will ask for it as soon as it loads
+    pendingImport = project;
     startEditor();
-    say("starting the editor to show the blocks", "say");
   }
 }
 
@@ -1846,6 +2126,13 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
 /* start up: the editor, as wide as the window allows.
    One press of "Normal size" brings the instruments and the log back. */
 furnish();
+if (!loadAll()) {
+  world.bots = [makeBot("Bot 1", 1000, 1500)];
+  world.mbits = [makeMicrobit("A", COLOURS[0], 300, 300)];
+  world.bots[0].host = world.mbits[0].id;
+}
+placeEveryone();
+renderDevices();
 draw(); instruments();
 
 startEditor();
