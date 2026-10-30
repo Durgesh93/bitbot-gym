@@ -1,0 +1,172 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { createBus } from "../../src/core/bus.js";
+import { createRoom, ROOM } from "../../src/app/room.js";
+import { normalFrom } from "../../src/world/fields/light.js";
+
+const eye = f => ({ z: 42, normal: normalFrom(f, 0.80) });
+
+let bus, room;
+beforeEach(() => { bus = createBus(); room = createRoom({ bus, scene: "classroom" }); });
+
+describe("the room", () => {
+  it("opens a scene and says which", () => {
+    expect(room.snapshot().scene).toBe("classroom");
+    expect(room.env().name).toBe("Classroom");
+  });
+
+  it("refuses a scene that does not exist, by name", () => {
+    expect(() => room.open("mars")).toThrow(/no scene called mars/);
+  });
+
+  it("refuses a message it does not understand, rather than ignoring it", () => {
+    expect(() => bus.send(ROOM, { cmd: "teleport" })).toThrow(/does not know how to teleport/);
+  });
+
+  it("puts a robot on the scene's own start pose", () => {
+    const id = bus.send(ROOM, { cmd: "add" });
+    const start = room.env().starts()[0];
+    expect(room.bodies()[0]).toMatchObject({ id, x: start.x, y: start.y });
+  });
+
+  it("answers all six questions over the bus", () => {
+    const at = { x: 1000, y: 1000 };
+    expect(typeof bus.send(ROOM, { cmd: "ray", from: at, angle: 0 })).toBe("number");
+    expect(typeof bus.send(ROOM, { cmd: "light", at, opts: eye(0) })).toBe("number");
+    expect(typeof bus.send(ROOM, { cmd: "sound", at })).toBe("number");
+    expect(bus.send(ROOM, { cmd: "surface", at })).toHaveProperty("material");
+    expect(bus.send(ROOM, { cmd: "medium" })).toHaveProperty("speedOfSound");
+    expect(bus.send(ROOM, { cmd: "radio", a: at, b: { x: 0, y: 0 } })).toHaveProperty("strength");
+  });
+
+  describe("flicking the light on", () => {
+    it("does nothing until the tick, and then changes what the sensor reads", () => {
+      /* The whole point of one bus with two verbs: the click is a post, so it
+         lands between ticks and every sensor in a tick agrees about it. */
+      const at = { x: 1000, y: 1400 };
+      bus.send(ROOM, { cmd: "lamp", id: 0, on: false });
+      const dark = bus.send(ROOM, { cmd: "light", at, opts: eye(0) });
+
+      bus.post(ROOM, { cmd: "lamp", id: 0, on: true });
+      expect(bus.send(ROOM, { cmd: "light", at, opts: eye(0) })).toBe(dark);   // not yet
+
+      room.tick();
+      expect(bus.send(ROOM, { cmd: "light", at, opts: eye(0) })).toBeGreaterThan(dark);
+    });
+
+    it("toggles when nobody says which way", () => {
+      expect(bus.send(ROOM, { cmd: "lamp", id: 0 })).toBe(false);
+      expect(bus.send(ROOM, { cmd: "lamp", id: 0 })).toBe(true);
+    });
+
+    it("shows up in the snapshot, so the UI never has to remember", () => {
+      bus.send(ROOM, { cmd: "lamp", id: 0, on: false });
+      expect(room.snapshot().lamps[0].on).toBe(false);
+      bus.send(ROOM, { cmd: "lamp", id: 0, on: true });
+      expect(room.snapshot().lamps[0].on).toBe(true);
+    });
+  });
+
+  describe("a human with a mouse", () => {
+    it("moves a robot to where the hand let go", () => {
+      const id = bus.send(ROOM, { cmd: "add" });
+      bus.post(ROOM, { cmd: "place", id, x: 1234, y: 567 });
+      room.tick();
+      expect(room.bodies()[0]).toMatchObject({ x: 1234, y: 567 });
+    });
+
+    it("collapses a whole drag into one move", () => {
+      const id = bus.send(ROOM, { cmd: "add" });
+      for (let i = 0; i < 60; i++) {
+        bus.post(ROOM, { cmd: "place", id, x: 500 + i, y: 500 }, { coalesce: "place:" + id });
+      }
+      expect(bus.pending()).toBe(1);
+      const out = room.tick();
+      expect(out.delivered).toBe(1);
+      expect(room.bodies()[0].x).toBe(559);
+    });
+
+    it("stops the wheels while it is being held, and lets go again", () => {
+      const id = bus.send(ROOM, { cmd: "add" });
+      const b = room.bodies()[0];
+      b.vl = 300; b.vr = 300;
+      bus.post(ROOM, { cmd: "hold", id });
+      room.tick();
+      expect(b.held).toBe(true);
+      expect(b.vl).toBe(0);
+
+      b.vl = 300;
+      bus.post(ROOM, { cmd: "drop", id });
+      room.tick();
+      expect(b.held).toBe(false);
+      expect(b.vl).toBe(300);          // it is free to drive again
+    });
+
+    it("lets a robot picked up and put down block another robot's sonar", () => {
+      const a = bus.send(ROOM, { cmd: "add" });
+      const b = bus.send(ROOM, { cmd: "add" });
+      bus.post(ROOM, { cmd: "place", id: b, x: 1000, y: 700 });
+      bus.post(ROOM, { cmd: "place", id: a, x: 1000, y: 1500 });
+      room.tick();
+      const from = { x: 1000, y: 1500 };
+      expect(bus.send(ROOM, { cmd: "ray", from, angle: -Math.PI / 2, opts: { self: a } }))
+        .toBeCloseTo(738, -1);
+    });
+  });
+
+  it("carries on when a mouse message is nonsense, and keeps a note of it", () => {
+    bus.post(ROOM, { cmd: "nonsense" });
+    bus.post(ROOM, { cmd: "lamp", id: 0, on: false });
+    const out = room.tick();
+    expect(out.failed).toHaveLength(1);
+    expect(out.delivered).toBe(1);                       // the good one still went through
+    expect(room.snapshot().lamps[0].on).toBe(false);
+    expect(room.problems()[0].what).toBe("failed");
+  });
+
+  it("notices a message sent to nobody", () => {
+    bus.post("nowhere", { cmd: "place" });
+    room.tick();
+    expect(room.problems()[0].what).toBe("nobody took it");
+  });
+
+  it("moves the clock on by one step a tick", () => {
+    const was = room.snapshot().t;
+    room.tick(); room.tick();
+    expect(room.snapshot().t).toBe(was + 10);
+  });
+
+  it("hands out a snapshot that is plain data", () => {
+    bus.send(ROOM, { cmd: "add" });
+    const snap = room.snapshot();
+    expect(() => JSON.parse(JSON.stringify(snap))).not.toThrow();
+    expect(snap.bodies[0]).toHaveProperty("id");
+  });
+
+  it("starts from the same seed every time a scene opens, so a run repeats", () => {
+    const a = createRoom({ bus: createBus(), scene: "classroom", seed: 7 });
+    const b = createRoom({ bus: createBus(), scene: "classroom", seed: 7 });
+    expect(a.snapshot().seed).toBe(7);
+    expect(b.snapshot()).toEqual(a.snapshot());
+  });
+
+  it("clears the robots out when a new scene opens", () => {
+    bus.send(ROOM, { cmd: "add" });
+    expect(room.bodies()).toHaveLength(1);
+    bus.send(ROOM, { cmd: "scene", name: "outdoor" });
+    expect(room.bodies()).toHaveLength(0);
+    expect(room.env().name).toBe("Playground");
+  });
+
+  it("lets a board beep and be heard by its neighbour", () => {
+    const a = bus.send(ROOM, { cmd: "add" });
+    const b = bus.send(ROOM, { cmd: "add" });
+    bus.send(ROOM, { cmd: "place", id: a, x: 1000, y: 1000 });
+    bus.send(ROOM, { cmd: "place", id: b, x: 1100, y: 1000 });
+    const quiet = bus.send(ROOM, { cmd: "sound", at: { x: 1100, y: 1000 }, opts: { self: b } });
+    bus.send(ROOM, { cmd: "beep", id: a });
+    room.tick();
+    const loud = bus.send(ROOM, { cmd: "sound", at: { x: 1100, y: 1000 }, opts: { self: b } });
+    expect(quiet).toBe(0);
+    expect(loud).toBeGreaterThan(0);
+  });
+});

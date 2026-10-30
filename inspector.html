@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bit:Bot Gym - field inspector</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0d1017; color: #e8eaf0;
+         font: 14px/1.5 system-ui, -apple-system, sans-serif; }
+  header { padding: 14px 18px; border-bottom: 1px solid #222838; }
+  h1 { margin: 0 0 2px; font-size: 16px; font-weight: 500; }
+  header p { margin: 0; color: #8b93a7; font-size: 12px; }
+  main { display: flex; gap: 18px; padding: 18px; flex-wrap: wrap; align-items: flex-start; }
+  canvas#room { background: #11141c; border: 1px solid #222838; border-radius: 10px;
+                width: min(620px, 92vw); height: min(620px, 92vw); touch-action: none; cursor: crosshair; }
+  aside { width: 330px; min-width: 300px; display: flex; flex-direction: column; gap: 14px; }
+  .panel { background: #141823; border: 1px solid #222838; border-radius: 10px; padding: 12px 14px; }
+  .panel h2 { margin: 0 0 10px; font-size: 12px; font-weight: 500; color: #8b93a7;
+              text-transform: uppercase; letter-spacing: .06em; }
+  label { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+  select, button { background: #1c2230; color: #e8eaf0; border: 1px solid #2c3446;
+                   border-radius: 6px; padding: 5px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover, select:hover { border-color: #46506a; }
+  button.on { background: #3a3317; border-color: #ffd166; color: #ffd166; }
+  #switches { display: flex; flex-wrap: wrap; gap: 6px; }
+  #probe { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+  #probe b { font-weight: 500; color: #8b93a7; }
+  #probe span { font-variant-numeric: tabular-nums; }
+  #status { color: #8b93a7; font-size: 12px; font-variant-numeric: tabular-nums; }
+  #problems { color: #ff8a8a; font-size: 12px; min-height: 18px; }
+  .hint { color: #8b93a7; font-size: 12px; margin: 0; }
+  kbd { background: #1c2230; border: 1px solid #2c3446; border-radius: 4px; padding: 0 4px; font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Field inspector</h1>
+  <p>A ruler for the world engine, not the gym. Every click here is a posted message, so it lands between ticks - exactly as a child's mouse does.</p>
+</header>
+<main>
+  <canvas id="room" width="620" height="620"></canvas>
+  <aside>
+    <div class="panel">
+      <h2>Scene</h2>
+      <label>room <select id="scene"></select></label>
+      <label>heat map
+        <select id="field">
+          <option value="light">light</option>
+          <option value="sound">sound</option>
+          <option value="none">off</option>
+        </select>
+      </label>
+      <p class="hint">brightest sample: <span id="scale">-</span> units</p>
+    </div>
+    <div class="panel">
+      <h2>Switches</h2>
+      <div id="switches"></div>
+    </div>
+    <div class="panel">
+      <h2>Robots</h2>
+      <button id="addbot">add a robot</button>
+      <p class="hint">drag one about to move it; <kbd>&larr;</kbd> <kbd>&rarr;</kbd> turn the last one. The red line is its sonar.</p>
+    </div>
+    <div class="panel">
+      <h2>The six questions</h2>
+      <div id="probe"></div>
+    </div>
+    <div class="panel">
+      <h2>Room</h2>
+      <div id="status"></div>
+      <div id="problems"></div>
+    </div>
+  </aside>
+</main>
+<script type="module" src="/src/tools/inspector/main.js"></script>
+</body>
+</html>
