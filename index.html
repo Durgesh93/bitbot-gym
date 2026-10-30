@@ -539,6 +539,7 @@ const CATALOGUE = {
   "pen":        { w: 80,  h: 20,  z: 15,  fill: "#2b2f38", reflect: 0.25 },
   "book":       { w: 150, h: 110, z: 35,  fill: "#8a3b52", reflect: 0.35 },
   "box":        { w: 300, h: 150, z: 260, fill: "#50596b", reflect: 0.40 },
+  "speaker":    { w: 170, h: 130, z: 280, fill: "#23262e", reflect: 0.14, speaker: true },
   "ceiling light": { light: "ceiling" },
   "floor light":   { light: "floor" },
   "lamp":          { light: "floor" },
@@ -573,6 +574,8 @@ function nameObject(bx, name) {
   bx.name = String(name || "").trim() || "box";
   bx.w = spec.w; bx.h = spec.h; bx.z = spec.z;
   bx.fill = spec.fill; bx.reflect = spec.reflect; bx.round = !!spec.round;
+  bx.speaker = !!spec.speaker;                     // a speaker can be switched on
+  if (!bx.speaker) bx.playing = false;
   bx.x = clamp(cx - bx.w / 2, 0, ROOM - bx.w);
   bx.y = clamp(cy - bx.h / 2, 0, ROOM - bx.h);
   shadowsStale = true;
@@ -663,7 +666,6 @@ function pointInPoly(x, y, poly) {
    the furniture-only set is what the sensors read. The robot is in the first
    but not the second - its own shadow must not fall on its own eyes. */
 let shadowsStale = true;
-let SHADOWS = { lamps: [] };                  // for drawing: furniture and every robot
 let SEEN = { lamps: [] };                     // for sensing: the same, tagged with who cast it
 function buildShadows() {
   const casters = world.boxes.map(bx => ({ box: bx, owner: bx })).concat(
@@ -673,7 +675,6 @@ function buildShadows() {
     })));
   SEEN.lamps = world.lamps.map(L => L.on
     ? casters.map(c => ({ poly: shadowQuad(c.box, { x: L.x, y: L.y, H: lampH(L) }), owner: c.owner })) : []);
-  SHADOWS.lamps = SEEN.lamps.map(set => set.map(e => e.poly));
   shadowsStale = false;        // before the bounce, or it asks for shadows again
   buildBounce();
 }
@@ -685,8 +686,11 @@ function inShadow(x, y, which, self) {
   }
   return false;
 }
-const lampH = L => (L.kind === "ceiling" ? 2400 : 110);
-const lampI = L => (L.kind === "ceiling" ? 13 : cfg.torch / 1000);
+/* A classroom ceiling is about 2.5 m up; a lamp standing on the floor has its
+   bulb barely above the robot, which is why its light comes in sideways.
+   Both are bright: a modern LED panel floods the whole room. */
+const lampH = L => (L.kind === "ceiling" ? 2500 : 300);
+const lampI = L => (L.kind === "ceiling" ? 18 : cfg.torch / 1000 * 1.6);
 const anyCeiling = () => world.lamps.some(L => L.on && L.kind === "ceiling");
 
 function lampsOn() {
@@ -704,7 +708,7 @@ function buildBounce() {
   for (const bx of world.boxes) {
     const r = bx.reflect == null ? 0.4 : bx.reflect;
     if (r < 0.05) continue;
-    const cx = bx.x, cy = bx.y;                   // a thing is placed by its middle
+    const o = objCentre(bx), cx = o.x, cy = o.y;
     const e = illuminance(cx, cy, undefined, bx, false);
     if (e < 0.02) continue;
     // the lit face is what throws light back: the top, or the sides if it stands tall
@@ -726,7 +730,7 @@ function buildBounce() {
 function illuminance(x, y, facing, self, withBounce, sz) {
   if (shadowsStale) { buildShadows(); shadowsStale = false; }
   const z = sz === undefined ? 0 : sz;               // how high the sensor itself is
-  let e = anyCeiling() ? 0.20 : 0.004;               // light bouncing round the room
+  let e = anyCeiling() ? 0.28 : 0.004;               // light bouncing round the room
   for (const L of lampsOn()) {
     const dx = L.x - x, dy = L.y - y, dz = L.H - z;
     const d2 = (dx * dx + dy * dy + dz * dz) / 1e6;  // m^2, all three axes
@@ -765,8 +769,10 @@ function readLightSensor(b, which) {
   const side = which === "L" ? -BOT.senSide : BOT.senSide;
   const p = sensorPoint(b, BOT.senFwd, side);
   const facing = b.h + (which === "L" ? -BOT.senAngle : BOT.senAngle);
-  // real sensors jitter by a unit or two, which is also what breaks a dead heat
-  let v = ldr(illuminance(p.x, p.y, facing, b, true, BOT.senZ), 1023) + Math.round(Math.random() * 6 - 3);
+  // a moving robot's sensors jitter by a unit or two, which is also what breaks
+  // a dead heat between two eyes reading exactly the same thing
+  let v = ldr(illuminance(p.x, p.y, facing, b, true, BOT.senZ), 1023)
+          + Math.round((Math.random() * 6 - 3) * stirBot(b)) + (which === "L" ? 1 : -1);
   if (cfg.invert) v = 1023 - v;
   return clamp(v, 0, 1023);
 }
@@ -801,7 +807,8 @@ function magneticForce(m, axis) {
   const H = FIELD.total * Math.cos(incl);          // the horizontal part, about 15 uT
   const Z = FIELD.total * Math.sin(incl);          // the vertical part, about 48 uT, downwards
   const t = compassHeadingDeg(m) * Math.PI / 180;
-  const noise = () => (Math.random() - 0.5) * 0.6;
+  const jit = astir(m) * 0.8;
+  const noise = () => (Math.random() - 0.5) * jit;
   if (axis === "x") return Math.round((-H * Math.sin(t) + noise()) * 10) / 10;
   if (axis === "y") return Math.round((H * Math.cos(t) + noise()) * 10) / 10;
   if (axis === "z") return Math.round((Z + noise()) * 10) / 10;
@@ -813,27 +820,76 @@ function magneticForce(m, axis) {
    is shaken by its own gearboxes, warmed by them, shoved along its nose when
    it starts and pushed sideways when it turns. All of that is what the
    microphone, the thermometer and the accelerometer actually read. */
+// nothing is perfectly steady while it is being shaken about; sitting still, it is
+function stirBot(b) {
+  if (!b) return 0;
+  return Math.min(1, (Math.abs(b.lm) + Math.abs(b.rm)) / 200 + Math.abs(b.vl + b.vr) / 400);
+}
+function astir(m) { return stirBot(botOf(m)); }
+/* How loud it is at one spot in the room. An empty room is silent - zero -
+   and every noise falls away with distance, so walking the robot towards the
+   speaker makes the number climb. The noises are: a speaker someone switched
+   on, the buzzer on any board that is playing a sound (a board hears its own
+   loud and clear, and its neighbour's faintly), and the robot's own gearboxes,
+   which sit right under the microphone. */
+function soundAt(x, y, me) {
+  let v = 0;
+  const from = (sx, sy, loud, r0) => {
+    const d2 = (sx - x) * (sx - x) + (sy - y) * (sy - y);
+    v += loud * (r0 * r0) / (r0 * r0 + d2);
+  };
+  for (const bx of world.boxes) {
+    if (!bx.speaker || !bx.playing) continue;
+    const o = objCentre(bx);
+    from(o.x, o.y, 430, 500);
+  }
+  for (const o of world.mbits) {
+    if (simTime >= o.beeping) continue;
+    if (o === me) { v += 255; continue; }           // the buzzer is right beside the microphone
+    const q = placeOf(o);
+    from(q.x, q.y, 250, 260);
+  }
+  return v;
+}
 function readSoundLevel(m) {
-  const b = botOf(m);
-  let v = 26 + Math.random() * 8;                  // a quiet classroom still hums
-  if (b) v += (Math.abs(b.lm) + Math.abs(b.rm)) / 200 * 130;    // the motors are the loudest thing
-  if (simTime < m.beeping) v = 212 + Math.random() * 24;         // its own buzzer drowns the lot
+  const p = placeOf(m);
+  let v = soundAt(p.x, p.y, m);
+  v += stirBot(botOf(m)) * 130;                     // its own motors, and it cannot move away from them
   return clamp(Math.round(v), 0, 255);
+}
+/* "on loud sound" and "on quiet sound", the way the real board does it: it
+   fires once on the way up past loud, and again on the way back down. */
+function soundWatch() {
+  for (const m of world.mbits) {
+    const lvl = readSoundLevel(m);
+    const was = !!m.loudState;
+    const now = lvl > 150 ? true : lvl < 120 ? false : was;
+    if (now === was) continue;
+    m.loudState = now;
+    const cb = m.handlers[now ? "soundloud" : "soundquiet"];
+    if (!cb) continue;
+    say("heard it go " + (now ? "loud" : "quiet") + " (" + lvl + ")", "say", m);
+    Promise.resolve(cb()).catch(e => { if (!(e instanceof Stopped)) say(e.message, "err", m); });
+  }
 }
 function readTemperature(m) {
   const b = botOf(m);
   return Math.round(21 + 1 + (b ? b.warm : 0));    // the chip always reads a bit above the room
 }
-// milli-g on each axis. Lying flat and still, z reads about -1024: gravity.
+/* Milli-g on each axis, and it is the SHOVE the board feels, with gravity
+   left out: a board sitting still reads 0, 0, 0, and a number only appears
+   when something actually pushes it. (A real micro:bit also feels the 1024
+   of gravity pulling down its z axis; leaving it out is what makes these
+   three numbers readable for a nine year old.) */
 function accelMg(m, axis) {
   const b = botOf(m);
-  const shake = b ? (Math.abs(b.lm) + Math.abs(b.rm)) / 200 * 26 : 0;
-  const n = () => (Math.random() - 0.5) * (7 + shake);
+  const shake = astir(m) * 30;
+  const n = () => (Math.random() - 0.5) * shake;    // still means still
   const fx = (b ? b.aside : 0) / 9.81, fy = (b ? b.afwd : 0) / 9.81;   // mm/s^2 -> milli-g
   if (axis === "x") return Math.round(fx + n());
   if (axis === "y") return Math.round(fy + n());
-  if (axis === "z") return Math.round(-1024 + n());
-  return Math.round(Math.sqrt(fx * fx + fy * fy + 1024 * 1024));
+  if (axis === "z") return Math.round(n());
+  return Math.round(Math.sqrt(fx * fx + fy * fy));
 }
 function rotationDeg(m, which) {
   const a = accelMg(m, which === "pitch" ? "y" : "x");
@@ -953,6 +1009,12 @@ const ICONS = {
   Duck: "0110011100011111111001110", House: "0010001110111111111001110",
   StickFigure: "0010011111001000101010001", Umbrella: "0111011111001000101001100"
 };
+const ARROWS = {
+  North:     "0010001110101010010000100", NorthEast: "0011100011001010100010000",
+  East:      "0010000010111110001000100", SouthEast: "1000001000001010001100111",
+  South:     "0010000100101010111000100", SouthWest: "0000100010101001100011100",
+  West:      "0010001000111110100000100", NorthWest: "1110011000101000001000001"
+};
 const UNKNOWN = "1111110001101011000111111";
 
 const screenEls = [];
@@ -1051,6 +1113,10 @@ async function showText(m, text, interval) {
 const ENUMS = {
   /* ---- the micro:bit side ---- */
   IconNames: new Proxy({}, { get: (_, k) => String(k) }),
+  ArrowNames: new Proxy({}, { get: (_, k) => String(k) }),
+  Direction: { Right: "right", Left: "left" },
+  LedSpriteProperty: new Proxy({}, { get: (_, k) => String(k) }),
+  DisplayMode2: { BlackAndWhite: 0, Greyscale: 1 },
   Button: { A: "A", B: "B", AB: "AB" },
   Gesture: { Shake: "shake", LogoUp: "logo", LogoDown: "logodown", ScreenUp: "up", ScreenDown: "down",
              TiltLeft: "tiltleft", TiltRight: "tiltright", FreeFall: "freefall" },
@@ -1141,6 +1207,7 @@ function makeApi(m) {
 
   const basic = {
     showIcon: (name) => { setScreen(m, ICONS[name] || UNKNOWN); sayd("show icon " + name); },
+    showArrow: (name) => { setScreen(m, ARROWS[name] || UNKNOWN); sayd("show arrow " + name); },
     showLeds: (s) => { screenFromLeds(m, s); sayd("show leds"); },
     showNumber: async (n, interval) => {
       const str = String(Math.round(n * 1000) / 1000);
@@ -1165,6 +1232,9 @@ function makeApi(m) {
     onGesture: (g, cb) => { m.handlers[g] = cb; },
     isGesture: () => false,
     onLogoEvent: (e, cb) => { m.handlers.logo = cb; },
+    onPinPressed: (pin, cb) => { m.handlers["pin" + pin] = cb; },
+    onPinReleased: () => {},
+    onPinTouchEvent: (pin, e, cb) => { m.handlers["pin" + pin] = cb; },
     logoIsPressed: () => m.held.logo,
     pinIsPressed: (pin) => pin === "logo" ? m.held.logo : false,
     onSound: (which, cb) => { m.handlers["sound" + which] = cb; },
@@ -1181,6 +1251,15 @@ function makeApi(m) {
     plot: (x, y) => { m.screen[y * 5 + x] = 1; },
     unplot: (x, y) => { m.screen[y * 5 + x] = 0; },
     toggle: (x, y) => { m.screen[y * 5 + x] ^= 1; },
+    point: (x, y) => !!m.screen[y * 5 + x],
+    plotBrightness: (x, y, b) => { m.screen[y * 5 + x] = b > 0 ? 1 : 0; },
+    pointBrightness: (x, y) => (m.screen[y * 5 + x] ? m.bright : 0),
+    brightness: () => m.bright,
+    setBrightness: (b) => { m.bright = clamp(Math.round(b), 0, 255); sayd("screen brightness " + m.bright); },
+    setDisplayMode: () => {},
+    enable: (on) => { if (!on) setScreen(m, "0".repeat(25)); },
+    stopAnimation: () => { m.token++; },
+    fadeIn: () => {}, fadeOut: () => {}, screenshot: () => null,
     plotBarGraph: (value, high) => {
       const h = high || 1;
       const rows = Math.max(0, Math.min(5, Math.round(value / h * 5)));
@@ -1201,9 +1280,25 @@ function makeApi(m) {
     ringTone: (f) => { sayd("tone " + Math.round(f) + " Hz"); m.beeping = simTime + 1000; },
     rest: async (ms) => { await wait(m, ms); },
     builtinPlayableSoundEffect: (s) => String(s),
+    builtInPlayableMelody: (s) => String(s),
+    createSoundExpression: (s) => String(s),
     tonePlayable: (n, b) => String(n),
     beat: (b) => 250,
-    setVolume: () => {}
+    tempo: () => m.tempo || 120,
+    setTempo: (t) => { m.tempo = t; sayd("tempo " + t); },
+    changeTempoBy: (d) => { m.tempo = (m.tempo || 120) + d; sayd("tempo " + m.tempo); },
+    startMelody: (tune) => { m.beeping = simTime + 2000; sayd("melody: " + tune); },
+    playMelody: async (tune, mode) => {
+      m.beeping = simTime + 2000; sayd("melody: " + tune);
+      await wait(m, mode === 1 ? 0 : 2000);
+    },
+    stopMelody: () => { m.beeping = 0; sayd("melody stopped"); },
+    stopAllSounds: () => { m.beeping = 0; sayd("quiet"); },
+    isSoundPlaying: () => simTime < m.beeping,
+    onEvent: (e, cb) => { m.handlers["music" + e] = cb; },
+    setBuiltInSpeakerEnabled: () => {},
+    volume: () => m.volume === undefined ? 127 : m.volume,
+    setVolume: (v) => { m.volume = v; }
   };
   const radio = {
     setGroup: (g) => { m.radioGroup = g; sayd("radio group " + g); },
@@ -1230,6 +1325,23 @@ function makeApi(m) {
     once(m, "addon:" + group, "note: " + name + " needs the " + group + " add-on, which the gym has not got");
 
   const bitbot = {
+
+    /* ---- the bolt-on boards 4tronix sells for the Bit:Bot ----------------
+       The class has none of these, so rather than pretend, each one says
+       plainly what it would have needed. The program carries on. */
+    oledSet: () => once(m, "oled", "there is no OLED screen on this Bit:Bot, so the screen blocks do nothing", "say"),
+    oledLine: () => once(m, "oled", "there is no OLED screen on this Bit:Bot, so the screen blocks do nothing", "say"),
+    oledCircle: () => once(m, "oled", "there is no OLED screen on this Bit:Bot, so the screen blocks do nothing", "say"),
+    oledNumber: () => once(m, "oled", "there is no OLED screen on this Bit:Bot, so the screen blocks do nothing", "say"),
+    oledZOOM: () => once(m, "oled", "there is no OLED screen on this Bit:Bot, so the screen blocks do nothing", "say"),
+    setMatrix: () => once(m, "matrix", "there is no 8x8 matrix on this Bit:Bot, so the matrix blocks do nothing", "say"),
+    matShowImage: () => once(m, "matrix", "there is no 8x8 matrix on this Bit:Bot, so the matrix blocks do nothing", "say"),
+    matRectangle: () => once(m, "matrix", "there is no 8x8 matrix on this Bit:Bot, so the matrix blocks do nothing", "say"),
+    matBrightness: () => once(m, "matrix", "there is no 8x8 matrix on this Bit:Bot, so the matrix blocks do nothing", "say"),
+    setArrayPixel: () => once(m, "matrix", "there is no 8x8 matrix on this Bit:Bot, so the matrix blocks do nothing", "say"),
+    setBitEye: () => once(m, "face", "there is no BitFace on this Bit:Bot, so the eye and mouth blocks do nothing", "say"),
+    setBitMouth: () => once(m, "face", "there is no BitFace on this Bit:Bot, so the eye and mouth blocks do nothing", "say"),
+    saveCalibration: () => sayd("wheel calibration saved"),
 
     /* ---------------- which robot ---------------- */
     select_model: (mod) => { b.model = (mod === "Auto" ? "XL" : mod); sayd("Bit:Bot model: " + b.model); },
@@ -1457,8 +1569,46 @@ function makeApi(m) {
     loadCalibration: () => { }, saveCalibration: () => { },
     checkCalibration: () => 0
   };
+  // "every N ms do" - the queue runs each job again and again, so one wait does it
+  const loops = {
+    everyInterval: (ms, cb) => m.foreverQueue.push(async () => { await wait(m, Math.max(0, ms - 20)); await cb(); })
+  };
+  const game = {
+    score: () => m.score || 0,
+    setScore: (n) => { m.score = n; sayd("score is " + n); },
+    addScore: (n) => { m.score = (m.score || 0) + n; sayd("score " + m.score); },
+    removeLife: (n) => { m.lives = (m.lives === undefined ? 3 : m.lives) - (n || 1); sayd("lives " + m.lives); },
+    setLife: (n) => { m.lives = n; },
+    life: () => (m.lives === undefined ? 3 : m.lives),
+    isGameOver: () => !!m.over,
+    gameOver: async () => { m.over = true; sayd("GAME OVER, score " + (m.score || 0)); await showText(m, "GAME OVER " + (m.score || 0)); },
+    startCountdown: (ms) => sayd("countdown " + Math.round(ms / 1000) + " s"),
+    currentTime: () => Math.round(simTime)
+  };
+  const mkImage = (text) => {
+    const bits = String(text).replace(/[^#.]/g, "").replace(/#/g, "1").replace(/\./g, "0");
+    return {
+      showImage: (offset) => { setScreen(m, bits.slice(offset || 0).padEnd(25, "0").slice(0, 25)); sayd("show image"); },
+      scrollImage: async (step, interval) => { setScreen(m, bits.padEnd(25, "0").slice(0, 25)); await wait(m, interval || 200); },
+      plotFrame: (n) => { setScreen(m, bits.slice(n * 25).padEnd(25, "0").slice(0, 25)); },
+      width: () => bits.length / 5, pixel: (x, y) => bits[y * 5 + x] === "1"
+    };
+  };
+  const images = { createImage: mkImage, createBigImage: mkImage };
+  const serial = {
+    writeLine: (t) => sayd("serial: " + t),
+    writeString: (t) => sayd("serial: " + t),
+    writeNumber: (n) => sayd("serial: " + n),
+    writeValue: (k, v) => sayd("serial: " + k + " = " + v),
+    redirectToUSB: () => {}, setBaudRate: () => {}, onDataReceived: () => {}, readLine: () => ""
+  };
   const control = { waitMicros: async (us) => { await wait(m, us / 1000); }, inBackground: (cb) => m.foreverQueue.push(cb) };
-  const pins = { analogReadPin: () => 0, digitalReadPin: () => 0, analogWritePin: () => {}, digitalWritePin: () => {} };
+  const pins = {
+    analogReadPin: () => 0, digitalReadPin: () => 0,
+    analogWritePin: () => {}, digitalWritePin: () => {},
+    analogSetPeriod: () => {}, servoWritePin: () => {}, servoSetPulse: () => {},
+    setPull: () => {}, onPulsed: () => {}, pulseIn: () => 0, map: (v, a, b, c, d) => (v - a) * (d - c) / (b - a) + c
+  };
   const randint = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
 
   // anything the gym has not been taught yet reports itself instead of crashing
@@ -1483,7 +1633,9 @@ function makeApi(m) {
     basic: forgiving("basic", basic), input: forgiving("input", input),
     led: forgiving("led", led), music: forgiving("music", music),
     radio: forgiving("radio", radio), bitbot: forgiving("bitbot", bitbot, true),
-    control: forgiving("control", control), pins: forgiving("pins", pins), randint
+    control: forgiving("control", control), pins: forgiving("pins", pins),
+    loops: forgiving("loops", loops), game: forgiving("game", game),
+    images: images, serial: forgiving("serial", serial), randint
   };
 }
 function nameOfColour(c) {
@@ -1553,7 +1705,7 @@ async function runOne(m) {
   let fn;
   try {
     fn = new Function("__ns", "__en", "__st", '"use strict";\n' +
-      "const {basic,input,led,music,radio,bitbot,control,pins,randint} = __ns;\n" +
+      "const {basic,input,led,music,radio,bitbot,control,pins,loops,game,images,serial,randint} = __ns;\n" +
       "const {" + Object.keys(ENUMS).join(",") + "} = __en;\n" +
       "music.PlaybackMode = __en.PlaybackMode;\n" +
       stubLine +
@@ -1663,6 +1815,7 @@ async function loop() {
       physics(DT); simTime += DT; flushTimers();
       await Promise.resolve();
     }
+    soundWatch();
     draw(); instruments(); updateStage();
     await nextFrame();
   }
@@ -1781,47 +1934,62 @@ function overlayNote(text) {
   ctx.textBaseline = "alphabetic";
 }
 
+/* ---- the light map ----------------------------------------------------
+   The floor is worked out square by square, and each square asks EVERY lamp
+   how much light it is getting. That is the only honest way to do it: with
+   two lamps, a spot hidden from one but lit by the other is still lit, and
+   where two shadows overlap it really is dark. It is the same illuminance
+   the robot's sensors read, so what a child sees and what the robot feels
+   are the same thing. */
+const LMAP_N = 64;
+const lmap = document.createElement("canvas");
+lmap.width = lmap.height = LMAP_N;
+const lctx = lmap.getContext("2d");
+let lmapAt = -1;
+function buildLightMap() {
+  const img = lctx.createImageData(LMAP_N, LMAP_N);
+  const step = ROOM / LMAP_N, n = LMAP_N * LMAP_N;
+  const e = new Float32Array(n);
+  let top = 0;
+  for (let j = 0; j < LMAP_N; j++) {
+    for (let i = 0; i < LMAP_N; i++) {
+      const v = illuminance((i + 0.5) * step, (j + 0.5) * step, null, null, true, 0);
+      e[j * LMAP_N + i] = v;
+      if (v > top) top = v;
+    }
+  }
+  /* Two things decide how a square looks: how bright the room is at all,
+     and how it compares with the brightest square in it. That second part
+     is what makes a shadow show up under a lamp bright enough to wash
+     everything out - the eye judges a shadow by what is beside it. */
+  const lit = top / (top + 0.9);
+  for (let k = 0; k < n; k++) {
+    const v = Math.pow(e[k] / (top || 1), 0.8) * lit;
+    const q = k * 4;
+    img.data[q] = 255 * v; img.data[q + 1] = 248 * v; img.data[q + 2] = 232 * v;
+    img.data[q + 3] = 255;
+  }
+  lctx.putImageData(img, 0, 0);
+  lmapAt = Date.now();
+}
+
 function draw() {
   buildShadows(); shadowsStale = false;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, cv.width, cv.height);
 
-  // the floor, with only the light that bounces around the room
-  ctx.fillStyle = anyCeiling() ? "#333b4c" : "#111319";
+  // the floor itself, and the line somebody drew on it
+  ctx.fillStyle = "#9aa0ac";
   ctx.fillRect(0, 0, cv.width, cv.height);
-
-  // a ceiling light spreads wide; one on the floor makes a tight pool
-  for (const L of world.lamps) {
-    if (!L.on) continue;
-    const ceiling = L.kind === "ceiling";
-    const g = ctx.createRadialGradient(L.x * S, L.y * S, ceiling ? 10 : 4,
-                                       L.x * S, L.y * S, (ceiling ? 2600 : 760) * S);
-    if (ceiling) {
-      g.addColorStop(0, "rgba(255,246,222,0.66)");
-      g.addColorStop(0.45, "rgba(255,242,210,0.48)");
-      g.addColorStop(1, "rgba(255,238,198,0.26)");
-    } else {
-      g.addColorStop(0, "rgba(255,230,150,0.62)");
-      g.addColorStop(0.4, "rgba(255,210,120,0.20)");
-      g.addColorStop(1, "rgba(255,200,100,0)");
-    }
-    ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height);
-  }
-
-  // the line drawn on the floor, before the shadows fall across it
   ctx.drawImage(floor, 0, 0, cv.width, cv.height);
 
-  // the shadows themselves - the same ones the light sensors are reading
-  const paint = (polys, alpha) => {
-    ctx.fillStyle = "rgba(10,11,16," + alpha + ")";
-    for (const poly of polys) {
-      ctx.beginPath();
-      ctx.moveTo(poly[0].x * S, poly[0].y * S);
-      for (const pt of poly.slice(1)) ctx.lineTo(pt.x * S, pt.y * S);
-      ctx.closePath(); ctx.fill();
-    }
-  };
-  world.lamps.forEach((L, i) => paint(SHADOWS.lamps[i] || [], L.kind === "ceiling" ? 0.26 : 0.42));
+  // then the light, multiplied over it: dark floor where no lamp can reach
+  if (!running || Date.now() - lmapAt > 80) buildLightMap();
+  ctx.save();
+  ctx.globalCompositeOperation = "multiply";
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(lmap, 0, 0, cv.width, cv.height);
+  ctx.restore();
 
   // the furniture, each turned however you left it
   for (const b of world.boxes) {
@@ -1859,28 +2027,8 @@ function draw() {
     }
 
     // three handles: turn it, copy it, take it away
-    const H = handlesOf(b), rr = 9 * S;
-    const disc = (pt, tint, line) => {
-      ctx.beginPath(); ctx.arc(pt.x * S, pt.y * S, rr, 0, 7);
-      ctx.fillStyle = tint; ctx.fill();
-      ctx.strokeStyle = line; ctx.lineWidth = 1.4; ctx.stroke();
-    };
-    disc(H.turn, "rgba(91,192,235,0.22)", "rgba(91,192,235,0.75)");
-    ctx.beginPath(); ctx.arc(H.turn.x * S, H.turn.y * S, 4.5 * S, 0.6, 5.1);
-    ctx.strokeStyle = "rgba(91,192,235,0.95)"; ctx.lineWidth = 1.6; ctx.stroke();
-
-    disc(H.copy, "rgba(70,195,123,0.22)", "rgba(70,195,123,0.75)");
-    ctx.beginPath();
-    ctx.moveTo(H.copy.x * S - 4.5 * S, H.copy.y * S); ctx.lineTo(H.copy.x * S + 4.5 * S, H.copy.y * S);
-    ctx.moveTo(H.copy.x * S, H.copy.y * S - 4.5 * S); ctx.lineTo(H.copy.x * S, H.copy.y * S + 4.5 * S);
-    ctx.strokeStyle = "rgba(70,195,123,0.95)"; ctx.lineWidth = 1.8; ctx.stroke();
-
-    disc(H.del, "rgba(232,87,90,0.22)", "rgba(232,87,90,0.8)");
-    const d = 4.2 * S;
-    ctx.beginPath();
-    ctx.moveTo(H.del.x * S - d, H.del.y * S - d); ctx.lineTo(H.del.x * S + d, H.del.y * S + d);
-    ctx.moveTo(H.del.x * S + d, H.del.y * S - d); ctx.lineTo(H.del.x * S - d, H.del.y * S + d);
-    ctx.strokeStyle = "rgba(232,87,90,0.95)"; ctx.lineWidth = 1.9; ctx.stroke();
+    const H = handlesOf(b);
+    drawHandle(H.turn, "turn"); drawHandle(H.copy, "copy"); drawHandle(H.del, "del");
   }
 
   // where each robot has been, in the colour of the board driving it
@@ -1897,7 +2045,11 @@ function draw() {
     }
   }
 
-  for (const L of world.lamps) drawBulb(L);
+  for (const L of world.lamps) { drawBulb(L); drawHandle(lampHandles(L).del, "del"); }
+  for (const m of world.mbits) {
+    const H = devHandles(m);
+    drawHandle(H.turn, "turn"); drawHandle(H.del, "del");
+  }
 
   for (const b of world.bots) drawBot(b);
   for (const m of world.mbits) if (!botOf(m)) drawBoard(m);
@@ -2037,7 +2189,25 @@ function drawThingDetail(b) {
   const tall = h >= w;                                    // which way it is facing
   ctx.save();
 
-  if (name.includes("sofa")) {
+  if (b.speaker || name.includes("speaker")) {
+    ctx.fillStyle = dark;                                 // the cabinet
+    roundRect(x + w * 0.06, y + h * 0.06, w * 0.88, h * 0.88, 5 * S); ctx.fill();
+    const cx = x + w / 2, cy = y + h / 2, r = Math.min(w, h) * 0.26;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);            // the big cone
+    ctx.fillStyle = b.playing ? "#7a6a3a" : "#3a3e48"; ctx.fill();
+    ctx.strokeStyle = light; ctx.lineWidth = 1.3; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.35, 0, 7);     // and the dome in the middle
+    ctx.fillStyle = b.playing ? "#ffe9a3" : "#555a66"; ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, y + h * 0.17, Math.min(w, h) * 0.09, 0, 7);   // the tweeter
+    ctx.fillStyle = "#3a3e48"; ctx.fill();
+    if (b.playing) {                                      // sound coming out of it
+      ctx.strokeStyle = "rgba(255,233,163,0.75)"; ctx.lineWidth = 1.6;
+      for (let k = 1; k <= 3; k++) {
+        ctx.beginPath(); ctx.arc(cx, cy, r + k * 7 * S, -0.9, 0.9); ctx.stroke();
+      }
+    }
+
+  } else if (name.includes("sofa")) {
     ctx.fillStyle = dark;                                 // the back
     if (tall) roundRect(x, y, w * 0.3, h, 6 * S); else roundRect(x, y, w, h * 0.3, 6 * S);
     ctx.fill();
@@ -2174,6 +2344,36 @@ function drawBulb(L) {
   }
 }
 
+/* The three little handles. Everything you can put in the room wears them:
+   blue turns it, green makes another one, red takes it away. */
+const HANDLE = { turn: ["rgba(91,192,235,0.22)", "rgba(91,192,235,0.78)"],
+                 copy: ["rgba(70,195,123,0.22)", "rgba(70,195,123,0.78)"],
+                 del:  ["rgba(232,87,90,0.22)",  "rgba(232,87,90,0.82)"] };
+function drawHandle(pt, kind) {
+  const x = pt.x * S, y = pt.y * S, r = 9 * S, col = HANDLE[kind];
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 7);
+  ctx.fillStyle = col[0]; ctx.fill();
+  ctx.strokeStyle = col[1]; ctx.lineWidth = 1.4; ctx.stroke();
+  ctx.strokeStyle = col[1].replace("0.78", "0.95").replace("0.82", "0.95");
+  const d = 4.4 * S;
+  ctx.beginPath();
+  if (kind === "turn") { ctx.arc(x, y, 4.5 * S, 0.6, 5.1); ctx.lineWidth = 1.6; }
+  else if (kind === "copy") {
+    ctx.moveTo(x - d, y); ctx.lineTo(x + d, y);
+    ctx.moveTo(x, y - d); ctx.lineTo(x, y + d); ctx.lineWidth = 1.8;
+  } else {
+    ctx.moveTo(x - d * 0.95, y - d * 0.95); ctx.lineTo(x + d * 0.95, y + d * 0.95);
+    ctx.moveTo(x + d * 0.95, y - d * 0.95); ctx.lineTo(x - d * 0.95, y + d * 0.95); ctx.lineWidth = 1.9;
+  }
+  ctx.stroke();
+}
+// a lamp gets one handle, to take it out; a board gets two, to turn it and to take it away
+function lampHandles(L) { return { del: { x: L.x + 105, y: L.y - 80 } }; }
+function devHandles(m) {
+  const p = placeOf(m), r = m.bot ? BOT.radius : 46;
+  return { turn: { x: p.x + r + 52, y: p.y }, del: { x: p.x, y: p.y - (r + 52) } };
+}
+
 function roundRect(x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
@@ -2254,6 +2454,22 @@ cv.addEventListener("pointerdown", ev => {
   try { cv.setPointerCapture(ev.pointerId); } catch (e) { /* some pointers cannot be captured */ }
   const p = canvasToMm(ev);
   if (tool === "pen" || tool === "erase") { dragging = { kind: tool, last: p }; paint(p, p); return; }
+  // the red x and the blue turn handle on every board, and the x on every lamp
+  for (const m of world.mbits) {
+    const H = devHandles(m);
+    if (Math.hypot(p.x - H.del.x, p.y - H.del.y) < 44) { removeDevice(m); return; }
+    if (Math.hypot(p.x - H.turn.x, p.y - H.turn.y) < 44) { dragging = { kind: "spinAny", place: placeOf(m) }; return; }
+  }
+  for (const L of world.lamps) {
+    const H = lampHandles(L);
+    if (Math.hypot(p.x - H.del.x, p.y - H.del.y) < 44) {
+      world.lamps = world.lamps.filter(o => o !== L);
+      shadowsStale = true;
+      say("the " + L.kind + " light taken out of the room", "say");
+      draw(); instruments();
+      return;
+    }
+  }
   for (const b of world.bots) {
     const nose = { x: b.x + Math.cos(b.h) * 75, y: b.y + Math.sin(b.h) * 75 };
     if (Math.hypot(p.x - nose.x, p.y - nose.y) < 45) { b.held = true; dragging = { kind: "spin", bot: b }; return; }
@@ -2287,7 +2503,7 @@ cv.addEventListener("pointerdown", ev => {
       dragging = { kind: "box", box: twin, dx: p.x - twin.x, dy: p.y - twin.y };
       return;
     }
-    if (objContains(bx, p)) { dragging = { kind: "box", box: bx, dx: p.x - bx.x, dy: p.y - bx.y }; return; }
+    if (objContains(bx, p)) { dragging = { kind: "box", box: bx, dx: p.x - bx.x, dy: p.y - bx.y, moved: false }; return; }
   }
 });
 cv.addEventListener("pointermove", ev => {
@@ -2300,9 +2516,15 @@ cv.addEventListener("pointermove", ev => {
   }
   else if (dragging.kind === "bot") { dragging.bot.x = p.x; dragging.bot.y = p.y; dragging.bot.trail.length = 0; }
   else if (dragging.kind === "spin") { dragging.bot.h = Math.atan2(p.y - dragging.bot.y, p.x - dragging.bot.x); }
+  else if (dragging.kind === "spinAny") {
+    const q = dragging.place;
+    q.h = Math.atan2(p.y - q.y, p.x - q.x);
+  }
   else if (dragging.kind === "board") { dragging.m.x = p.x; dragging.m.y = p.y; }
   else if (dragging.kind === "box") {
-    dragging.box.x = p.x - dragging.dx; dragging.box.y = p.y - dragging.dy;
+    const nx = p.x - dragging.dx, ny = p.y - dragging.dy;
+    if (Math.hypot(nx - dragging.box.x, ny - dragging.box.y) > 6) dragging.moved = true;
+    dragging.box.x = nx; dragging.box.y = ny;
     shadowsStale = true;
   }
   else if (dragging.kind === "turn") {
@@ -2317,6 +2539,10 @@ cv.addEventListener("pointerup", () => {
     if (dragging.kind === "pen" || dragging.kind === "erase") refreshFloor();
     if (dragging.bot) dragging.bot.held = false;
     if (dragging.lamp && !dragging.moved) dragging.lamp.on = !dragging.lamp.on;   // a tap switches it
+    if (dragging.kind === "box" && dragging.box.speaker && !dragging.moved) {
+      dragging.box.playing = !dragging.box.playing;
+      say(dragging.box.playing ? "the speaker is playing" : "the speaker is off", "say");
+    }
   }
   dragging = null;
   draw();
@@ -2764,15 +2990,20 @@ el("renameDev").addEventListener("click", () => {
 el("pullCode").addEventListener("click", pullCode);
 el("addBot").addEventListener("click", () => addDevice("bitbot"));
 el("addMbit").addEventListener("click", () => addDevice("microbit"));
-el("delDev").addEventListener("click", () => {
-  if (world.mbits.length <= 1) return;
-  const gone = mbit();
-  world.mbits.splice(world.sel, 1);
-  world.sel = Math.max(0, world.sel - 1);
-  say(gone.name + " taken away", "say");
-  syncBots(); placeEveryone(); renderDevices(); showProjectOf(mbit());
-  draw(); instruments(); saveAll();
-});
+// taking one away, either from the bench list or by its red x in the room
+function removeDevice(m) {
+  if (world.mbits.length <= 1) { say("the room needs at least one board in it", "say"); return; }
+  const i = world.mbits.indexOf(m);
+  if (i < 0) return;
+  m.token++; killTimers(m); m.foreverQueue = []; m.live = false;
+  world.mbits.splice(i, 1);
+  world.sel = Math.min(world.sel, world.mbits.length - 1);
+  say(m.name + " taken away", "say");
+  syncBots(); renderDevices(); showProjectOf(mbit());
+  shadowsStale = true; draw(); instruments(); saveAll();
+  if (stageOpen()) { stageCards = new Map(); syncStage(); updateStage(); }
+}
+el("delDev").addEventListener("click", () => removeDevice(mbit()));
 
 /* ========================================================================
    12. Opening a .hex. A MakeCode hex carries the project inside it: records
@@ -2899,7 +3130,8 @@ const STAGE_CSS = `
                  grid-template-columns: minmax(0, 54fr) minmax(0, 46fr); }
   #stage .left { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
   #stage .left h1 { margin: 2px 0 0; }
-  #stage canvas { width: 100%; height: auto; max-width: min(100%, 76vh); margin: 0 auto;
+  #stage #stageRoomSlot { flex: 1 1 auto; min-height: 0; display: flex; justify-content: center; }
+  #stage canvas { width: auto; height: auto; max-width: 100%; max-height: 100%;
                   border-radius: 10px; background: #0d1017; display: block; }
   #stage .tools { display: flex; flex-wrap: wrap; gap: 6px; }
   #stage .tools button { padding: 5px 9px; font-size: 11.5px; }
@@ -3056,10 +3288,15 @@ function buildStage() {
   sp.addEventListener("change", e => { el("speed").value = e.target.value; });
 }
 
+let tickMoan = 0;
 function stageTick() {
   if (!stageOpen()) return;
-  if (!running) { draw(); updateStage(); }   // while it runs, the sim loop does this
-  requestAnimationFrame(stageTick);
+  try {
+    if (!running) { draw(); updateStage(); }   // while it runs, the sim loop does this
+  } catch (e) {
+    if (!tickMoan++) say("something went wrong drawing the room: " + e.message, "err");
+  }
+  requestAnimationFrame(stageTick);           // keep going whatever happened
 }
 
 function openStage() {
@@ -3097,11 +3334,11 @@ function syncStage() {
     /* Every card has a micro:bit half: the screen, and everything the board
        itself can feel. A Bit:Bot card has a robot half underneath as well,
        with the wheels, the eyes, the line sensors and the sonar. */
-    const MB_ROWS = [["light level", "lv"], ["sound level", "sd"], ["temperature", "tp"],
-                     ["compass", "cp"], ["magnet x/y/z", "mg"], ["accel x/y/z", "ac"],
+    const MB_ROWS = [["light level 0-255", "lv"], ["sound level 0-255", "sd"], ["temperature", "tp"],
+                     ["compass", "cp"], ["magnet x/y/z \u00b5T", "mg"], ["accel x/y/z mg", "ac"],
                      ["pitch / roll", "tl"], ["buttons", "bt"], ["radio group", "rg"]];
-    const BOT_ROWS = [["light eyes L/R", "ll"], ["line L / R", "ln"], ["sonar", "sn"],
-                      ["motors L / R", "mo"], ["speed", "sp"], ["battery", "ba"]];
+    const BOT_ROWS = [["light eyes L/R 0-1023", "ll"], ["line L / R", "ln"], ["sonar", "sn"],
+                      ["motors L / R %", "mo"], ["speed", "sp"], ["battery", "ba"]];
     const tbl = rows => "<table>" + rows.map(r =>
       '<tr><td class="k">' + r[0] + '</td><td class="v" data-f="' + r[1] + '">-</td></tr>').join("") + "</table>";
     const KEYS = [["A", "A"], ["B", "B"], ["AB", "A+B"], ["shake", "Shake"], ["logo", "Logo"]];
@@ -3182,8 +3419,14 @@ function backfillCardLogs() {
   });
 }
 
+let lastNumbers = 0;
 function updateStage() {
   if (!stageOpen()) return;
+  // the screens and the lights keep up with every frame, but the numbers only
+  // change five times a second - at sixty they are a blur nobody can read
+  const now = Date.now();
+  const numbers = now - lastNumbers > 190;
+  if (numbers) lastNumbers = now;
   const before = stageCards.size;
   syncStage();
   if (stageCards.size !== before) backfillCardLogs();
@@ -3196,7 +3439,7 @@ function updateStage() {
     c.where.textContent = m.kind === "bitbot" ? "robot" : "in hand";
     c.card.classList.toggle("idle", !m.code.trim());
     c.card.classList.toggle("live", !!m.live);
-    const set = (k, v) => { if (c.f[k]) c.f[k].textContent = v; };
+    const set = (k, v) => { if (numbers && c.f[k]) c.f[k].textContent = v; };
     const held = ["A", "B", "logo"].filter(k => m.held[k]);
     // the board's own senses, which every card has
     set("lv", readScreenLight(m));
