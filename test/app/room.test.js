@@ -200,8 +200,12 @@ describe("the room", () => {
       const id = bus.send(ROOM, { cmd: "add" });
       room.tick();
       const r = readsOf(room.snapshot(), id);
-      expect(Object.keys(r).sort())
-        .toEqual(["lightL", "lightR", "lineL", "lineR", "sonar", "sound"]);
+      expect(Object.keys(r).sort()).toEqual([
+        /* the board's half */
+        "buttonA", "buttonB", "compass", "light", "logo", "magnet",
+        /* and the chassis's */
+        "lightL", "lightR", "lineL", "lineR", "sonar", "sound"
+      ].sort());
     });
 
     it("changes them when the robot moves, because its probes moved", () => {

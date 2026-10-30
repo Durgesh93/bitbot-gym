@@ -24,10 +24,17 @@ import { createEnvironment } from "../world/environment.js";
 import { sample } from "../world/senses.js";
 import { SCENES, DEFAULT_SCENE } from "../world/scenes/index.js";
 import * as bitbot from "../hardware/bitbot.js";
+import * as microbit from "../hardware/microbit.js";
+import { createBoard } from "../hardware/microbit.js";
 
-/* Every kind of thing that can be put in the room: where its senses are, and
-   how it turns what the world says into the number a block returns. Adding a
-   second chassis is one more line here. */
+/* Every kind of chassis that can be put in the room: where its senses are,
+   and how it turns what the world says into the number a block returns.
+   Adding a second chassis is one more line here.
+
+   Every robot also carries a micro:bit, because that is how the real thing
+   works: the board is the brain and the chassis is the body. The board has
+   its own two probes - the screen doubles as a light meter and the V2 has a
+   microphone - so a robot's probe list is the two lists joined. */
 const DEVICES = { bitbot: bitbot };
 
 export const ROOM = "world";
@@ -71,7 +78,8 @@ export function createRoom(options) {
       device: s.device || "bitbot",
       /* this robot's own small squint, fixed for its whole life, so its two
          eyes never read exactly the same and a light-chaser can choose */
-      trim: s.trim == null ? random.int(-6, 6) : s.trim
+      trim: s.trim == null ? random.int(-6, 6) : s.trim,
+      board: createBoard({ id: id, name: s.name || ("micro:bit " + id) })
     });
     return env.addBody({
       id: id,
@@ -115,6 +123,20 @@ export function createRoom(options) {
         S.playing = m.playing == null ? !S.playing : !!m.playing;
         return S.playing;
       }
+      /* A finger on a button, a hand shaking the board, a child picking a
+         radio group. All posts: they come from a human, so they land
+         between ticks like every other human thing. */
+      case "press":   { const k = kit.get(m.id); return k ? k.board.press(m.button, m.down) : false; }
+      case "gesture": { const k = kit.get(m.id); if (k) k.board.gesture(m.name); return !!k; }
+      case "group":   { const k = kit.get(m.id); return k ? k.board.group(m.group) : false; }
+      case "screen":  { const k = kit.get(m.id); if (!k) return false;
+                        if (m.text != null) k.board.screen.leds(m.text);
+                        else if (m.icon) k.board.screen.icon(m.icon);
+                        else if (m.ch != null) k.board.screen.glyph(m.ch);
+                        else k.board.screen.clear();
+                        return true; }
+      case "board":   { const k = kit.get(m.id); return k ? k.board : null; }
+
       case "beep": {
         emitters = emitters.filter(e => e.owner !== m.id);
         if (m.on !== false) {
@@ -162,8 +184,15 @@ export function createRoom(options) {
       const own = kit.get(b.id);
       const dev = own && DEVICES[own.device];
       if (!dev) continue;
-      const raw = sample(env, b, dev.PROBES);
-      senses.set(b.id, { senses: raw, reads: dev.read(raw, own.trim) });
+      const raw = sample(env, b, dev.PROBES.concat(microbit.PROBES));
+      senses.set(b.id, {
+        senses: raw,
+        /* the chassis half and the board half, in one object, because a
+           child's card does not care which circuit board a number came off */
+        reads: { ...dev.read(raw, own.trim), ...own.board.read(raw, b) },
+        screen: own.board.screen.cells(),
+        board: own.board.state()
+      });
     }
 
     advance(DT);
@@ -183,7 +212,8 @@ export function createRoom(options) {
     const s = env.snapshot();
     s.bodies = s.bodies.map(b => {
       const got = senses.get(b.id);
-      return got ? { ...b, senses: got.senses, reads: got.reads } : b;
+      return got ? { ...b, senses: got.senses, reads: got.reads,
+                     screen: got.screen, board: got.board } : b;
     });
     return { t: clock.now, scene: sceneName, seed: seed, ...s };
   }
