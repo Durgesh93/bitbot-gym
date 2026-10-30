@@ -174,7 +174,6 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
       <option value="8">8x</option>
     </select>
   </label>
-  <button id="allDev">Full screen</button>
   <button id="openHex">Open a .hex</button>
   <input type="file" id="hexFile" accept=".hex" hidden>
   <button id="wide">Small blocks</button>
@@ -213,10 +212,9 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
     <div id="roomHome">
     <canvas id="room" width="1100" height="1100"></canvas>
     <div class="tools" id="roomTools">
-      <button id="lights" class="on">Room lights: on</button>
-      <button id="addLamp">Add light</button>
+      <button id="addCeil">Add ceiling light</button>
+      <button id="addFloor">Add floor light</button>
       <button id="delLamp">Remove light</button>
-      <button id="torch">All torches off</button>
       <span class="sep"></span>
       <button data-tool="move" class="on">Drag things</button>
       <button data-tool="pen">Draw line</button>
@@ -342,8 +340,7 @@ function makeDevice(kind, name, colour, x, y) {
 
 const world = {
   mbits: [], bots: [], sel: 0,
-  lights: { room: true, cx: 1000, cy: 1000, H: 2400 },
-  lamps: [{ x: 1680, y: 1720, on: false }],
+  lamps: [{ x: 1000, y: 1000, on: true, kind: "ceiling" }],
   view: "plain",
   boxes: [],
   showTrail: true
@@ -554,42 +551,41 @@ function pointInPoly(x, y, poly) {
    the furniture-only set is what the sensors read. The robot is in the first
    but not the second - its own shadow must not fall on its own eyes. */
 let shadowsStale = true;
-let SHADOWS = { room: [], lamps: [] };        // for drawing: furniture and every robot
-let SEEN = { room: [], lamps: [] };           // for sensing: the same, tagged with who cast it
+let SHADOWS = { lamps: [] };                  // for drawing: furniture and every robot
+let SEEN = { lamps: [] };                     // for sensing: the same, tagged with who cast it
 function buildShadows() {
-  const ceil = { x: world.lights.cx, y: world.lights.cy, H: world.lights.H };
   const casters = world.boxes.map(bx => ({ box: bx, owner: null })).concat(
     world.bots.map(b => ({
       box: { x: b.x - BOT.radius, y: b.y - BOT.radius, w: BOT.radius * 2, h: BOT.radius * 2, z: 95 },
       owner: b
     })));
-  SEEN.room = world.lights.room ? casters.map(c => ({ poly: shadowQuad(c.box, ceil), owner: c.owner })) : [];
   SEEN.lamps = world.lamps.map(L => L.on
-    ? casters.map(c => ({ poly: shadowQuad(c.box, { x: L.x, y: L.y, H: 110 }), owner: c.owner })) : []);
-  SHADOWS.room = SEEN.room.map(e => e.poly);
+    ? casters.map(c => ({ poly: shadowQuad(c.box, { x: L.x, y: L.y, H: lampH(L) }), owner: c.owner })) : []);
   SHADOWS.lamps = SEEN.lamps.map(set => set.map(e => e.poly));
 }
 function inShadow(x, y, which, self) {
-  const set = which === "room" ? SEEN.room : (SEEN.lamps[which] || []);
+  const set = SEEN.lamps[which] || [];
   for (const e of set) {
     if (e.owner && e.owner === self) continue;    // your own shadow is not on your own sensors
     if (pointInPoly(x, y, e.poly)) return true;
   }
   return false;
 }
+const lampH = L => (L.kind === "ceiling" ? 2400 : 110);
+const lampI = L => (L.kind === "ceiling" ? 3.2 : cfg.torch / 1000);
+const anyCeiling = () => world.lamps.some(L => L.on && L.kind === "ceiling");
+
 function lampsOn() {
   const out = [];
   world.lamps.forEach((L, i) => {
-    if (L.on) out.push({ key: i, x: L.x, y: L.y, I: cfg.torch / 1000, H: 110 });
+    if (L.on) out.push({ key: i, x: L.x, y: L.y, I: lampI(L), H: lampH(L) });
   });
-  if (world.lights.room)
-    out.push({ key: "room", x: world.lights.cx, y: world.lights.cy, I: 3.2, H: world.lights.H });
   return out;
 }
 // illuminance in arbitrary but consistent units; facing is a heading, or null for "pointing at the ceiling"
 function illuminance(x, y, facing, self) {
   if (shadowsStale) { buildShadows(); shadowsStale = false; }
-  let e = world.lights.room ? 0.05 : 0.004;          // light bouncing round the room
+  let e = anyCeiling() ? 0.05 : 0.004;          // light bouncing round the room          // light bouncing round the room
   for (const L of lampsOn()) {
     const dx = L.x - x, dy = L.y - y;
     const d2 = (dx * dx + dy * dy) / 1e6;            // m^2
@@ -718,6 +714,7 @@ function say(msg, cls, m) {
   const d = document.createElement("div");
   if (cls) d.className = cls;
   if (m) {
+    d.dataset.dev = m.id;
     const tag = document.createElement("b");
     tag.textContent = m.name + " ";
     tag.style.color = m.colour;
@@ -1540,26 +1537,24 @@ function draw() {
   ctx.clearRect(0, 0, cv.width, cv.height);
 
   // the floor, with only the light that bounces around the room
-  ctx.fillStyle = world.lights.room ? "#20242e" : "#111319";
+  ctx.fillStyle = anyCeiling() ? "#20242e" : "#111319";
   ctx.fillRect(0, 0, cv.width, cv.height);
 
-  // the lamp on the ceiling: brightest right underneath, fading outwards
-  if (world.lights.room) {
-    const g = ctx.createRadialGradient(world.lights.cx * S, world.lights.cy * S, 10,
-                                       world.lights.cx * S, world.lights.cy * S, 1500 * S);
-    g.addColorStop(0, "rgba(255,243,214,0.40)");
-    g.addColorStop(0.5, "rgba(255,238,200,0.17)");
-    g.addColorStop(1, "rgba(255,235,190,0.02)");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height);
-  }
-
-  // each torch: a tight pool, because it is down on the floor
+  // a ceiling light spreads wide; one on the floor makes a tight pool
   for (const L of world.lamps) {
     if (!L.on) continue;
-    const g = ctx.createRadialGradient(L.x * S, L.y * S, 4, L.x * S, L.y * S, 760 * S);
-    g.addColorStop(0, "rgba(255,230,150,0.62)");
-    g.addColorStop(0.4, "rgba(255,210,120,0.20)");
-    g.addColorStop(1, "rgba(255,200,100,0)");
+    const ceiling = L.kind === "ceiling";
+    const g = ctx.createRadialGradient(L.x * S, L.y * S, ceiling ? 10 : 4,
+                                       L.x * S, L.y * S, (ceiling ? 1500 : 760) * S);
+    if (ceiling) {
+      g.addColorStop(0, "rgba(255,243,214,0.40)");
+      g.addColorStop(0.5, "rgba(255,238,200,0.17)");
+      g.addColorStop(1, "rgba(255,235,190,0.02)");
+    } else {
+      g.addColorStop(0, "rgba(255,230,150,0.62)");
+      g.addColorStop(0.4, "rgba(255,210,120,0.20)");
+      g.addColorStop(1, "rgba(255,200,100,0)");
+    }
     ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height);
   }
 
@@ -1576,8 +1571,7 @@ function draw() {
       ctx.closePath(); ctx.fill();
     }
   };
-  paint(SHADOWS.room, 0.26);
-  for (const set of SHADOWS.lamps) paint(set, 0.42);
+  world.lamps.forEach((L, i) => paint(SHADOWS.lamps[i] || [], L.kind === "ceiling" ? 0.26 : 0.42));
 
   // the furniture
   for (const b of world.boxes) {
@@ -1617,21 +1611,7 @@ function draw() {
     }
   }
 
-  // the ceiling lamp, seen from below
-  if (world.lights.room) {
-    ctx.beginPath(); ctx.arc(world.lights.cx * S, world.lights.cy * S, 22 * S, 0, 7);
-    ctx.fillStyle = "rgba(255,246,214,0.22)"; ctx.fill();
-    ctx.beginPath(); ctx.arc(world.lights.cx * S, world.lights.cy * S, 9 * S, 0, 7);
-    ctx.fillStyle = "#fff3cf"; ctx.fill();
-  }
-
-  // the torches, dim but still there when switched off
-  for (const L of world.lamps) {
-    ctx.beginPath(); ctx.arc(L.x * S, L.y * S, 15 * S, 0, 7);
-    ctx.fillStyle = L.on ? "#ffd76a" : "#4a4738";
-    ctx.fill();
-    ctx.strokeStyle = L.on ? "#6b5a2a" : "#5a5a4a"; ctx.lineWidth = 2; ctx.stroke();
-  }
+  for (const L of world.lamps) drawBulb(L);
 
   for (const b of world.bots) drawBot(b);
   for (const m of world.mbits) if (!botOf(m)) drawBoard(m);
@@ -1754,6 +1734,30 @@ function drawBot(b) {
   ctx.restore();
 
   nameBubble(host ? host.name : b.name, b.x * S, (b.y - 70) * S, accent);
+}
+
+/* a little bulb: tap it to switch it, drag it to move it */
+function drawBulb(L) {
+  const x = L.x * S, y = L.y * S, r = 15 * S;
+  if (L.on) {
+    ctx.beginPath(); ctx.arc(x, y, r * 2.2, 0, 7);
+    ctx.fillStyle = "rgba(255,230,150,0.18)"; ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(x, y - r * 0.18, r, 0, 7);               // the glass
+  ctx.fillStyle = L.on ? "#ffe9a3" : "#4a4738";
+  ctx.fill();
+  ctx.strokeStyle = L.on ? "#8a6f2a" : "#5a5a4a"; ctx.lineWidth = 1.6; ctx.stroke();
+  ctx.fillStyle = L.on ? "#b99a46" : "#3c3c33";                      // the screw cap
+  ctx.fillRect(x - r * 0.45, y + r * 0.62, r * 0.9, r * 0.6);
+  if (L.kind === "ceiling") {                                        // a shade, to say it hangs
+    ctx.beginPath();
+    ctx.moveTo(x - r * 1.5, y - r * 0.95);
+    ctx.lineTo(x + r * 1.5, y - r * 0.95);
+    ctx.lineTo(x + r * 0.7, y - r * 1.7);
+    ctx.lineTo(x - r * 0.7, y - r * 1.7);
+    ctx.closePath();
+    ctx.fillStyle = L.on ? "#d9c48a" : "#4e4e45"; ctx.fill();
+  }
 }
 
 function roundRect(x, y, w, h, r) {
@@ -1902,29 +1906,22 @@ document.querySelectorAll("[data-tool]").forEach(btn => btn.addEventListener("cl
   tool = btn.dataset.tool;
   document.querySelectorAll("[data-tool]").forEach(b => b.classList.toggle("on", b === btn));
 }));
-el("lights").addEventListener("click", e => {
-  world.lights.room = !world.lights.room;
-  e.target.textContent = "Room lights: " + (world.lights.room ? "on" : "off");
-  e.target.classList.toggle("on", world.lights.room);
-  if (!running) { draw(); instruments(); }
-});
-el("torch").addEventListener("click", e => {
-  const anyOn = world.lamps.some(L => L.on);
-  world.lamps.forEach(L => L.on = !anyOn);
-  e.target.textContent = anyOn ? "All torches off" : "All torches on";
-  e.target.classList.toggle("on", !anyOn);
-  draw(); instruments();
-});
-el("addLamp").addEventListener("click", () => {
-  if (world.lamps.length >= 6) return;
-  world.lamps.push({ x: 400 + world.lamps.length * 220, y: 1800, on: true });
-  draw(); instruments();
-});
+el("addCeil").addEventListener("click", () => addLamp("ceiling"));
+el("addFloor").addEventListener("click", () => addLamp("floor"));
 el("delLamp").addEventListener("click", () => {
-  if (world.lamps.length <= 1) return;
+  if (!world.lamps.length) return;
   world.lamps.pop();
   draw(); instruments();
 });
+function addLamp(kind) {
+  if (world.lamps.length >= 8) return;
+  const n = world.lamps.length;
+  world.lamps.push({
+    x: 350 + (n % 4) * 430, y: kind === "ceiling" ? 500 + (n % 2) * 400 : 1750,
+    on: true, kind: kind
+  });
+  draw(); instruments();
+}
 el("clearLine").addEventListener("click", () => { fctx.clearRect(0, 0, FLOOR_N, FLOOR_N); refreshFloor(); draw(); });
 el("addBox").addEventListener("click", () => {
   world.boxes.push({ x: 880, y: 320, w: 300, h: 150, z: 260, name: "box", fill: "#50596b" }); draw();
@@ -2553,7 +2550,7 @@ function openStage() {
   stageHost.querySelector("#stageToolSlot").appendChild(el("roomTools"));
   stageHost.querySelector("#stageSpeed").value = el("speed").value;
   stageCards = new Map();
-  syncStage(); updateStage();
+  syncStage(); backfillCardLogs(); updateStage();
   requestAnimationFrame(stageTick);
 }
 
@@ -2628,9 +2625,28 @@ function syncStage() {
   }
 }
 
+// a card built after a program started still gets the lines it missed
+function backfillCardLogs() {
+  if (!stageOpen()) return;
+  stageCards.forEach((c, key) => {
+    if (!c.log || c.log.children.length) return;
+    const id = String(key).slice(1);
+    for (const d of log.children) {
+      if (d.dataset.dev !== id) continue;
+      const line = d.cloneNode(true);
+      const tag = line.querySelector("b");
+      if (tag) tag.remove();
+      c.log.appendChild(line);
+    }
+    c.log.scrollTop = c.log.scrollHeight;
+  });
+}
+
 function updateStage() {
   if (!stageOpen()) return;
+  const before = stageCards.size;
   syncStage();
+  if (stageCards.size !== before) backfillCardLogs();
   const dash = "—";
   for (const m of world.mbits) {
     const c = stageCards.get("m" + m.id);
@@ -2658,7 +2674,6 @@ function updateStage() {
   stageHost.querySelector("#stageClock").textContent = (simTime / 1000).toFixed(1) + " s";
 }
 
-el("allDev").addEventListener("click", openStage);
 
 
 /* Installing as an app: the browser needs the worker registered, and that only
