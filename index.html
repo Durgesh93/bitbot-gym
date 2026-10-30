@@ -128,7 +128,6 @@ footer { color: var(--muted); font-size: 12px; margin-top: 14px; }
   <button id="openHex">Open a .hex</button>
   <input type="file" id="hexFile" accept=".hex" hidden>
   <button id="wide">Big blocks</button>
-  <label class="inline"><input type="checkbox" id="sound" checked> sound</label>
 </header>
 
 <div class="layout">
@@ -698,22 +697,8 @@ async function showText(text, interval) {
   await scrollText(str, interval);
 }
 
-/* a small, honest beep so sounds are noticeable without being a nuisance */
-let actx = null;
-function beep(kind) {
-  if (!document.getElementById("sound").checked) return;
-  try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
-    o.type = "triangle";
-    const f = kind === "low" ? 220 : kind === "high" ? 880 : 440;
-    o.frequency.setValueAtTime(f, t);
-    o.frequency.exponentialRampToValueAtTime(f * (kind === "low" ? 0.6 : 1.8), t + 0.18);
-    g.gain.setValueAtTime(0.09, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.21);
-  } catch (e) { /* no audio, no problem */ }
-}
+/* Sound is not simulated: the gym is about what the robot does. Every sound
+   block still runs and still takes its time, and the log says what played. */
 
 const handlers = { A: null, B: null, AB: null, shake: null, logo: null };
 
@@ -821,9 +806,9 @@ function makeApi() {
     }
   };
   const music = {
-    play: async (what, mode) => { say("sound: " + what); beep("mid"); await wait(mode === 1 ? 0 : 500); },
-    playTone: async (f, ms) => { beep(f > 500 ? "high" : "low"); await wait(ms); },
-    ringTone: (f) => beep(f > 500 ? "high" : "low"),
+    play: async (what, mode) => { say("sound: " + what); await wait(mode === 1 ? 0 : 500); },
+    playTone: async (f, ms) => { say("tone " + Math.round(f) + " Hz"); await wait(ms); },
+    ringTone: (f) => say("tone " + Math.round(f) + " Hz"),
     rest: async (ms) => { await wait(ms); },
     builtinPlayableSoundEffect: (s) => String(s),
     tonePlayable: (n, b) => String(n),
@@ -1036,8 +1021,8 @@ function makeApi() {
     convertRGB: (r, g, b) => (clamp(r, 0, 255) << 16) + (clamp(g, 0, 255) << 8) + clamp(b, 0, 255),
 
     /* ---------------- the buzzer ---------------- */
-    buzz: (flag) => { if (flag) beep("high"); },
-    buzzTime: async (ms) => { beep("high"); await wait(ms); },
+    buzz: (flag) => say("buzzer " + (flag ? "on" : "off")),
+    buzzTime: async (ms) => { say("buzz for " + ms + " ms"); await wait(ms); },
     setVolume: (v) => { if (!proOnly("setVolume")) say("buzzer volume " + v); },
 
     /* ---------------- things the gym has not got bolted on ---------------- */
