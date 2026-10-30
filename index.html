@@ -1775,6 +1775,7 @@ async function runDevice(m) {
   m.start = { x: p0.x, y: p0.y, h: p0.h };        // Reset brings it back here
   m.live = true;
   m.state = "run";
+  m.runFrom = simTime; m.runFor = 0;      // its own stopwatch, started by its own Play
   say("play", "say", m);
   await runOne(m);
   if (!m.foreverQueue.length) {
@@ -1783,10 +1784,12 @@ async function runDevice(m) {
        something to happen, so the card says "waiting", not "finished".
        A Stop in the middle already set the state, so leave that alone. */
     if (m.state === "run") m.state = Object.keys(m.handlers).length ? "wait" : "end";
+    if (m.state === "end") m.runFor = simTime - m.runFrom;   // the clock stops with it
   }
 }
 function stopDevice(m) {
   m.token++; killTimers(m); m.foreverQueue = []; m.live = false; m.state = "stop";
+  m.runFor = m.runFrom == null ? 0 : simTime - m.runFrom;
   if (m.bot) { m.bot.lm = m.bot.rm = 0; m.bot.brake = true; }
   say("stopped", "say", m);
 }
@@ -1796,6 +1799,7 @@ function stopDevice(m) {
    try the same program again and again and see the same thing happen. */
 function resetDevice(m) {
   m.token++; killTimers(m); m.foreverQueue = []; m.live = false; m.state = "ready";
+  m.runFrom = null; m.runFor = 0;
   m.handlers = {}; m.noted = new Set();
   m.held.A = m.held.B = m.held.logo = false; m.beeping = 0;
   m.radioGroup = 0;
@@ -1831,6 +1835,7 @@ function stopAll(quiet) {
   running = false;
   for (const m of world.mbits) {
     m.token++; killTimers(m); m.foreverQueue = []; m.live = false; m.state = "stop";
+    m.runFor = m.runFrom == null ? 0 : simTime - m.runFrom;
   }
   for (const b of world.bots) { b.lm = b.rm = 0; b.brake = true; }
   if (!quiet) say("stopped", "say");
@@ -3212,6 +3217,10 @@ const STAGE_CSS = `
   #stage .card > .sect:first-of-type { margin-top: 4px; }
   #stage .dot { width: 10px; height: 10px; border-radius: 50%; display: block; }
   #stage .where { margin-left: auto; font-size: 11px; color: var(--muted); }
+  #stage .ctime { font-family: var(--f-mono); font-size: 11px; color: var(--muted);
+                  font-variant-numeric: tabular-nums; }
+  #stage .card.live .ctime { color: #9ff0c0; }
+  #stage .card.off .ctime { color: #ffb4b7; }
   #stage .body { display: flex; gap: 10px; }
   #stage .scr { display: grid; grid-template-columns: repeat(5, 10px); gap: 3px; background: #08080c;
                 padding: 7px; border-radius: 7px; height: max-content; }
@@ -3322,10 +3331,8 @@ function buildStage() {
   stageHost.innerHTML =
     '<div class="bar">' +
       '<span class="title">Bit:Bot <span>Gym</span></span>' +
-      '<span class="clock" id="stageClock">0.0 s</span>' +
       '<span id="stageChips" style="display:flex;gap:6px;flex-wrap:wrap"></span>' +
       '<span class="spacer"></span>' +
-      '<button id="stageStop" class="stop">Stop all</button>' +
       '<button id="stageReset">\u21ba Reset all</button>' +
       '<label class="inline">Speed <select id="stageSpeed">' +
         '<option value="1">1x</option><option value="2">2x</option>' +
@@ -3339,7 +3346,6 @@ function buildStage() {
   document.body.appendChild(stageHost);
 
   stageHost.querySelector("#stageBack").addEventListener("click", closeStage);
-  stageHost.querySelector("#stageStop").addEventListener("click", () => stopAll(false));
   stageHost.querySelector("#stageReset").addEventListener("click", resetAll);
   const sp = stageHost.querySelector("#stageSpeed");
   sp.value = el("speed").value;
@@ -3405,7 +3411,8 @@ function syncStage() {
       card.className = "card";
       card.innerHTML =
         '<div class="top"><i class="dot" style="background:' + m.colour + '"></i><b>' + m.name +
-        '</b><span class="st"></span><span class="where"></span></div>' +
+        '</b><span class="st"></span><span class="where"></span>' +
+        '<span class="ctime">0.0 s</span></div>' +
         '<div class="sect">micro:bit</div>' +
         '<div class="body"><div class="scr">' + "<span></span>".repeat(25) + "</div>" +
         tbl(MB_ROWS) + "</div>" +
@@ -3444,7 +3451,7 @@ function syncStage() {
         card: card, cells: card.querySelectorAll(".scr span"),
         leds: card.querySelectorAll(".leds i"), where: card.querySelector(".where"),
         st: card.querySelector(".st"),
-        log: card.querySelector(".mlog"), f: f
+        log: card.querySelector(".mlog"), time: card.querySelector(".ctime"), f: f
       });
     }
     // the same chips as the bench, so you can still switch board up here
@@ -3496,6 +3503,10 @@ function updateStage() {
     const b = botOf(m);
     for (let i = 0; i < 25; i++) c.cells[i].classList.toggle("on", !!m.screen[i]);
     c.where.textContent = m.kind === "bitbot" ? "robot" : "in hand";
+    /* its own stopwatch: counting while it is awake, frozen where it stopped */
+    const t = m.runFrom == null ? 0
+            : m.live || m.state === "wait" ? simTime - m.runFrom : m.runFor || 0;
+    c.time.textContent = (t / 1000).toFixed(1) + " s";
     /* Three looks, so a glance tells you where a board is: running is bright
        with a green edge, stopped goes dark with a red one, and anything else
        is the plain card. The word beside the name spells it out. */
@@ -3539,7 +3550,6 @@ function updateStage() {
       c.leds[i].style.boxShadow = col && col !== "#000000" ? "0 0 5px " + col : "none";
     }
   }
-  stageHost.querySelector("#stageClock").textContent = (simTime / 1000).toFixed(1) + " s";
 }
 
 
