@@ -179,9 +179,8 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
     <div id="pane-blocks">
       <div class="devices" id="devices"></div>
       <div class="presets">
-        <button id="addMbit">Add micro:bit</button>
         <button id="addBot">Add Bit:Bot</button>
-        <label class="inline">plugged into <select id="plugSel"></select></label>
+        <button id="addMbit">Add micro:bit</button>
         <button id="delDev">Remove</button>
         <button id="pullCode" class="go">Take the code &amp; run</button>
       </div>
@@ -296,27 +295,32 @@ const COLOURS = ["#5bc0eb", "#f2b134", "#46c37b", "#e8575a", "#c77dff", "#2dd4bf
    ever needed. */
 let nextId = 1;
 
-function makeMicrobit(name, colour, x, y) {
-  return {
-    id: nextId++, name: name, colour: colour,
-    x: x, y: y, h: -Math.PI / 2,            // where it sits when nobody has plugged it in
-    code: "", project: null,
-    screen: new Array(25).fill(0),
-    radioGroup: 0,
-    timers: [], token: 0, foreverQueue: [], handlers: {}, noted: new Set()
-  };
-}
-
 function makeBot(name, x, y) {
   return {
-    id: nextId++, name: name, host: null,   // the id of the micro:bit plugged in
-    x: x, y: y, h: -Math.PI / 2,
+    name: name, x: x, y: y, h: -Math.PI / 2,
     lm: 0, rm: 0, vl: 0, vr: 0, brake: false,
     enc: { l: 0, r: 0 }, bias: { dir: null, amount: 0 },
     model: "XL", batt: 100,
     pixels: new Array(12).fill(null), pixelBright: 40,
     trail: []
   };
+}
+
+/* A device is one thing you can hold: either a Bit:Bot, which arrives with a
+   micro:bit already on it and wheels underneath, or a bare micro:bit in a
+   child's hand. Both carry a program; only one of them can drive. */
+function makeDevice(kind, name, colour, x, y) {
+  const d = {
+    id: nextId++, kind: kind, name: name, colour: colour,
+    x: x, y: y, h: -Math.PI / 2,
+    code: "", project: null,
+    screen: new Array(25).fill(0),
+    radioGroup: 0,
+    timers: [], token: 0, foreverQueue: [], handlers: {}, noted: new Set(),
+    bot: null
+  };
+  if (kind === "bitbot") d.bot = makeBot(name, x, y);
+  return d;
 }
 
 const world = {
@@ -327,10 +331,12 @@ const world = {
 };
 
 const mbit = () => world.mbits[world.sel] || world.mbits[0];
-const botOf = m => (m ? world.bots.find(b => b.host === m.id) || null : null);
-const hostOf = b => world.mbits.find(m => m.id === b.host) || null;
-// where a micro:bit actually is: in its Bit:Bot, or wherever it was put down
-const placeOf = m => botOf(m) || m;
+const botOf = m => (m && m.bot) || null;
+const hostOf = b => world.mbits.find(m => m.bot === b) || null;
+// where a device actually is: on its own wheels, or wherever it was put down
+const placeOf = m => m.bot || m;
+// the bodies, kept in step with the devices that own them
+function syncBots() { world.bots = world.mbits.map(m => m.bot).filter(Boolean); }
 
 const cfg = { top: 450, dead: 15, torch: 1200, invert: false };
 
@@ -1642,32 +1648,17 @@ function renderDevices() {
   const strip = el("devices");
   strip.innerHTML = "";
   world.mbits.forEach((m, i) => {
-    const b = botOf(m);
     const chip = document.createElement("button");
     chip.className = "chip" + (i === world.sel ? " on" : "");
     chip.style.borderColor = m.colour;
     if (i === world.sel) chip.style.background = m.colour + "33";
     chip.innerHTML = '<i style="background:' + m.colour + '"></i>' + m.name +
-                     (b ? ' <span>in ' + b.name + '</span>' : ' <span>in hand</span>');
+                     ' <span>' + (m.kind === "bitbot" ? "robot" : "in hand") + "</span>";
     chip.addEventListener("click", () => selectDevice(i));
     strip.appendChild(chip);
   });
-  const sel = el("plugSel");
-  sel.innerHTML = "";
-  const none = document.createElement("option");
-  none.value = ""; none.textContent = "in hand (no Bit:Bot)";
-  sel.appendChild(none);
-  for (const b of world.bots) {
-    const taken = hostOf(b);
-    const o = document.createElement("option");
-    o.value = String(b.id);
-    o.textContent = b.name + (taken && taken !== mbit() ? " - " + taken.name + " is in it" : "");
-    sel.appendChild(o);
-  }
-  const mine = botOf(mbit());
-  sel.value = mine ? String(mine.id) : "";
   el("addMbit").disabled = world.mbits.length >= MAX_MICROBITS;
-  el("addBot").disabled = world.bots.length >= MAX_BOTS;
+  el("addBot").disabled = world.mbits.filter(m => m.kind === "bitbot").length >= MAX_BOTS;
   el("delDev").disabled = world.mbits.length <= 1;
 }
 
@@ -1915,76 +1906,157 @@ async function pullCode() {
   runAll();
 }
 
-/* remember the whole bench between visits */
-function saveAll() {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({
-      mbits: world.mbits.map(m => ({ name: m.name, colour: m.colour, x: m.x, y: m.y,
-                                     code: m.code, project: m.project, bot: (botOf(m) || {}).name || null })),
-      bots: world.bots.map(b => ({ name: b.name, x: b.x, y: b.y }))
-    }));
-  } catch (e) { /* a full or blocked store is not worth a crash */ }
-}
-function loadAll() {
-  let data = null;
-  try { data = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { }
-  if (!data || !data.mbits || !data.mbits.length) return false;
-  world.bots = (data.bots || []).map(b => makeBot(b.name, b.x, b.y));
-  world.mbits = data.mbits.map((d, i) => {
-    const m = makeMicrobit(d.name, d.colour || COLOURS[i % COLOURS.length], d.x, d.y);
-    m.code = d.code || ""; m.project = d.project || null;
-    const b = world.bots.find(x => x.name === d.bot);
-    if (b) b.host = m.id;
-    return m;
+/* ========================================================================
+   The bench lives in a SQLite database. The simulation itself - where a
+   robot is this millisecond, how fast a wheel is turning, which pixels are
+   lit - stays in memory, because that changes two hundred times a second
+   and is thrown away at the end of a run. What the database holds is the
+   bench: which boards exist, what they are called, which body each one is
+   plugged into, and the blocks each one carries. Every change goes through
+   it, so the two views can never disagree about what is in the room.
+
+   Poke at it from the console:  gymSql("select id,kind,name from device")
+   ======================================================================== */
+const DB_KEY = "bitbot-gym-db";
+let SQL = null, db = null;
+
+const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS device (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('bitbot','microbit')),
+    name TEXT NOT NULL, colour TEXT, x REAL, y REAL,
+    model TEXT DEFAULT 'XL', code TEXT DEFAULT '', project TEXT);
+  CREATE TABLE IF NOT EXISTS setting (k TEXT PRIMARY KEY, v TEXT);
+`;
+
+async function openDb() {
+  if (db) return db;
+  if (!window.initSqlJs) {
+    await new Promise((res, rej) => {
+      const sc = document.createElement("script");
+      sc.src = "https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js";
+      sc.onload = res;
+      sc.onerror = () => rej(new Error("could not fetch SQLite"));
+      document.head.appendChild(sc);
+    });
+  }
+  SQL = await window.initSqlJs({
+    locateFile: f => "https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/" + f
   });
+  let bytes = null;
+  try {
+    const stored = localStorage.getItem(DB_KEY);
+    if (stored) bytes = Uint8Array.from(atob(stored), c => c.charCodeAt(0));
+  } catch (e) { bytes = null; }
+  db = bytes ? new SQL.Database(bytes) : new SQL.Database();
+  db.run("PRAGMA foreign_keys = ON;");
+  db.run(SCHEMA);
+  return db;
+}
+
+function persistDb() {
+  if (!db) return;
+  try { localStorage.setItem(DB_KEY, btoa(String.fromCharCode.apply(null, db.export()))); }
+  catch (e) { /* a full or blocked store should not stop the lesson */ }
+}
+
+// a plain query for the console, and for us
+function gymSql(sql, params) {
+  if (!db) return [];
+  const out = [];
+  const st = db.prepare(sql);
+  if (params) st.bind(params);
+  while (st.step()) out.push(st.getAsObject());
+  st.free();
+  return out;
+}
+window.gymSql = gymSql;
+
+/* the bench, written down */
+function saveAll() {
+  if (!db) return;
+  try {
+    db.run("BEGIN");
+    db.run("DELETE FROM device;");
+    const ins = db.prepare(
+      "INSERT INTO device (id,kind,name,colour,x,y,model,code,project) VALUES (?,?,?,?,?,?,?,?,?)");
+    for (const m of world.mbits) {
+      const p = placeOf(m);
+      ins.run([m.id, m.kind, m.name, m.colour, p.x, p.y,
+               m.bot ? m.bot.model : "XL", m.code || "",
+               m.project ? JSON.stringify(m.project) : null]);
+    }
+    ins.free();
+    db.run("COMMIT");
+  } catch (e) {
+    try { db.run("ROLLBACK"); } catch (e2) { }
+    say("could not write the bench: " + e.message, "err");
+    return;
+  }
+  persistDb();
+}
+
+/* and read back */
+function loadAll() {
+  if (!db) return false;
+  const rows = gymSql("SELECT * FROM device ORDER BY id");
+  if (!rows.length) return false;
+  world.mbits = rows.map((r, i) => {
+    const d = makeDevice(r.kind, r.name, r.colour || COLOURS[i % COLOURS.length], r.x, r.y);
+    d.id = r.id;
+    d.code = r.code || "";
+    try { d.project = r.project ? JSON.parse(r.project) : null; } catch (e) { d.project = null; }
+    if (d.bot) d.bot.model = r.model || "XL";
+    return d;
+  });
+  nextId = Math.max(0, ...world.mbits.map(m => m.id)) + 1;
+  syncBots();
   return true;
 }
-el("pullCode").addEventListener("click", () => { openStage(); pullCode(); });
 
 function placeEveryone() {
-  world.bots.forEach((b, i) => {
-    const n = Math.max(1, world.bots.length);
-    b.x = ROOM * (i + 1) / (n + 1); b.y = 1500; b.h = -Math.PI / 2;
+  syncBots();
+  const bots = world.bots;
+  bots.forEach((b, i) => {
+    b.x = ROOM * (i + 1) / (bots.length + 1); b.y = 1500; b.h = -Math.PI / 2;
     b.lm = b.rm = b.vl = b.vr = 0; b.trail.length = 0;
   });
-  const loose = world.mbits.filter(m => !botOf(m));
-  loose.forEach((m, i) => { m.x = 220 + (i % 5) * 150; m.y = 150 + Math.floor(i / 5) * 120; });
+  world.mbits.filter(m => !m.bot).forEach((m, i) => {
+    m.x = 220 + (i % 5) * 150; m.y = 150 + Math.floor(i / 5) * 120;
+  });
 }
 
-el("addMbit").addEventListener("click", () => {
+function nextName(kind) {
+  if (kind === "bitbot") {
+    let n = 1;
+    while (world.mbits.some(m => m.name === "Bit:Bot " + n)) n++;
+    return "Bit:Bot " + n;
+  }
+  let i = 0;
+  while (world.mbits.some(m => m.name === "micro:bit " + String.fromCharCode(65 + i))) i++;
+  return "micro:bit " + String.fromCharCode(65 + i);
+}
+
+function addDevice(kind) {
   if (world.mbits.length >= MAX_MICROBITS) return;
-  const n = world.mbits.length;
-  world.mbits.push(makeMicrobit(String.fromCharCode(65 + n), COLOURS[n % COLOURS.length], 0, 0));
+  if (kind === "bitbot" && world.mbits.filter(m => m.kind === "bitbot").length >= MAX_BOTS) return;
+  const colour = COLOURS[world.mbits.length % COLOURS.length];
+  world.mbits.push(makeDevice(kind, nextName(kind), colour, 300, 300));
   world.sel = world.mbits.length - 1;
-  placeEveryone(); renderDevices(); showProjectOf(mbit()); draw(); instruments(); saveAll();
-});
-el("addBot").addEventListener("click", () => {
-  if (world.bots.length >= MAX_BOTS) return;
-  world.bots.push(makeBot("Bot " + (world.bots.length + 1), 1000, 1500));
-  placeEveryone(); renderDevices(); draw(); instruments(); saveAll();
-});
+  syncBots(); placeEveryone(); renderDevices(); showProjectOf(mbit());
+  draw(); instruments(); saveAll();
+}
+
+el("addBot").addEventListener("click", () => addDevice("bitbot"));
+el("addMbit").addEventListener("click", () => addDevice("microbit"));
 el("delDev").addEventListener("click", () => {
   if (world.mbits.length <= 1) return;
-  const m = mbit(), b = botOf(m);
-  if (b) b.host = null;
+  const gone = mbit();
   world.mbits.splice(world.sel, 1);
   world.sel = Math.max(0, world.sel - 1);
-  placeEveryone(); renderDevices(); showProjectOf(mbit()); draw(); instruments(); saveAll();
-});
-el("plugSel").addEventListener("change", e => {
-  const m = mbit();
-  const old = botOf(m);
-  if (old) old.host = null;
-  const b = world.bots.find(x => x.id === +e.target.value);
-  if (b) {
-    const prev = hostOf(b);
-    if (prev) { prev.x = 300; prev.y = 300; }
-    b.host = m.id;
-    say(m.name + " plugged into " + b.name, "say", m);
-  } else {
-    say(m.name + " taken out, held in hand", "say", m);
-  }
-  placeEveryone(); renderDevices(); draw(); instruments(); saveAll();
+  say(gone.name + " taken away", "say");
+  syncBots(); placeEveryone(); renderDevices(); showProjectOf(mbit());
+  draw(); instruments(); saveAll();
 });
 
 /* ========================================================================
@@ -2135,6 +2207,9 @@ const STAGE_CSS = `
   #stage td.v { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
   #stage .leds { display: flex; gap: 3px; margin-top: 7px; }
   #stage .leds i { width: 9px; height: 9px; border-radius: 50%; background: #2a2f3c; display: block; }
+  #stage .arms { display: flex; gap: 14px; margin-top: 8px; }
+  #stage .arms > div { display: flex; align-items: center; gap: 5px; }
+  #stage .arms b { font-size: 10px; color: var(--muted); font-weight: 600; }
   #stage .press { display: flex; gap: 4px; margin-top: 8px; }
   #stage .press button { flex: 1; padding: 4px 2px; font-size: 11px; }
   #stage #stageLog { flex: 1 1 auto; min-height: 90px; overflow: auto; background: #0d1017;
@@ -2147,6 +2222,13 @@ const STAGE_CSS = `
 `;
 
 const stageOpen = () => !!stageHost && stageHost.classList.contains("on");
+
+// the Bit:Bot's twelve lights are six down each side, so draw them that way
+const ARMS_HTML =
+  '<div class="arms">' +
+    '<div><b>L</b><div class="leds">' + "<i></i>".repeat(6) + "</div></div>" +
+    '<div><b>R</b><div class="leds">' + "<i></i>".repeat(6) + "</div></div>" +
+  "</div>";
 
 /* The gym is two pages: the bench where you build, and the room where it runs.
    An arrow on either side, or one finger dragged across, moves between them. */
@@ -2265,9 +2347,8 @@ function closeStage() {
 function syncStage() {
   if (!stageOpen()) return;
   const grid = stageHost.querySelector("#stageCardsBox");
-  const empties = world.bots.filter(b => !hostOf(b));
-  const want = world.mbits.map(m => m.id + m.name + m.colour).join(",") + "|" +
-               empties.map(b => b.id + b.name).join(",");
+  // every id, name, colour and kind, so any change at all rebuilds the cards
+  const want = world.mbits.map(m => m.id + m.kind + m.name + m.colour).join(",");
   if (grid.dataset.ids !== want) {
     grid.dataset.ids = want;
     grid.innerHTML = "";
@@ -2284,7 +2365,7 @@ function syncStage() {
         '<div class="body"><div class="scr">' + "<span></span>".repeat(25) + "</div>" +
         "<table>" + rows.map(r => '<tr><td class="k">' + r[0] + '</td><td class="v" data-f="' + r[1] + '">-</td></tr>').join("") +
         "</table></div>" +
-        '<div class="leds">' + "<i></i>".repeat(12) + "</div>" +
+        ARMS_HTML +
         '<div class="press">' + ["A", "B", "AB", "shake"]
           .map(k => '<button data-k="' + k + '">' + (k === "AB" ? "A+B" : k === "shake" ? "Shake" : k) + "</button>").join("") +
         "</div>";
@@ -2301,22 +2382,6 @@ function syncStage() {
         card: card, cells: card.querySelectorAll(".scr span"),
         leds: card.querySelectorAll(".leds i"), where: card.querySelector(".where"), f: f
       });
-    }
-    // and the bodies with nobody driving them
-    for (const b of empties) {
-      const card = document.createElement("div");
-      card.className = "card idle";
-      card.innerHTML =
-        '<div class="top"><i class="dot" style="background:#8d96a6"></i><b>' + b.name +
-        '</b><span class="where">no micro:bit</span></div>' +
-        "<table>" +
-        [["light L / R", "ll"], ["line L / R", "ln"], ["sonar", "sn"], ["battery", "ba"], ["model", "md"]]
-          .map(r => '<tr><td class="k">' + r[0] + '</td><td class="v" data-f="' + r[1] + '">-</td></tr>').join("") +
-        "</table>" + '<div class="leds">' + "<i></i>".repeat(12) + "</div>";
-      grid.appendChild(card);
-      const f = {};
-      card.querySelectorAll("[data-f]").forEach(td => f[td.dataset.f] = td);
-      stageCards.set("b" + b.id, { card: card, leds: card.querySelectorAll(".leds i"), f: f, bot: b });
     }
     // the same chips as the bench, so you can still switch board up here
     const chips = stageHost.querySelector("#stageChips");
@@ -2336,25 +2401,12 @@ function updateStage() {
   if (!stageOpen()) return;
   syncStage();
   const dash = "—";
-  for (const b of world.bots) {
-    const c = stageCards.get("b" + b.id);
-    if (!c) continue;
-    c.f.ll.textContent = readLightSensor(b, "L") + " / " + readLightSensor(b, "R");
-    c.f.ln.textContent = readLineSensor(b, "L") + " / " + readLineSensor(b, "R");
-    c.f.sn.textContent = readSonar(b) + " cm";
-    c.f.ba.textContent = Math.round(b.batt) + "%";
-    c.f.md.textContent = b.model;
-    for (let i = 0; i < 12; i++) {
-      const col = b.pixels[i];
-      c.leds[i].style.background = col && col !== "#000000" ? col : "#2a2f3c";
-    }
-  }
   for (const m of world.mbits) {
     const c = stageCards.get("m" + m.id);
     if (!c) continue;
     const b = botOf(m);
     for (let i = 0; i < 25; i++) c.cells[i].classList.toggle("on", !!m.screen[i]);
-    c.where.textContent = b ? "in " + b.name : "in hand";
+    c.where.textContent = m.kind === "bitbot" ? "robot" : "in hand";
     c.card.classList.toggle("idle", !m.code.trim());
     c.f.lv.textContent = readScreenLight(m);
     c.f.cp.textContent = compassHeadingDeg(m) + "°";
@@ -2386,17 +2438,25 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
 /* start up: the editor, as wide as the window allows.
    One press of "Normal size" brings the instruments and the log back. */
 furnish();
-if (!loadAll()) {
-  world.bots = [makeBot("Bot 1", 1000, 1500)];
-  world.mbits = [makeMicrobit("A", COLOURS[0], 300, 300)];
-  world.bots[0].host = world.mbits[0].id;
-}
-placeEveryone();
 addArrows();
-renderDevices();
-draw(); instruments();
+draw();
 
-startEditor();
+(async () => {
+  try {
+    await openDb();
+  } catch (e) {
+    say("SQLite did not load (" + e.message + "), so the bench will not be remembered this time", "err");
+  }
+  if (!loadAll()) {
+    world.mbits = [makeDevice("bitbot", "Bit:Bot 1", COLOURS[0], 1000, 1500)];
+    syncBots();
+    saveAll();
+  }
+  placeEveryone();
+  renderDevices();
+  draw(); instruments();
+  startEditor();
+})();
 </script>
 </body>
 </html>
