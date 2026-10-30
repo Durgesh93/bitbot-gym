@@ -260,24 +260,6 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
 
   <aside class="instr">
     <div class="panel">
-      <h2>What the robot senses</h2>
-      <table class="read">
-        <tr><td class="k">light sensor left</td><td class="v" id="r-ll">0</td></tr>
-        <tr><td class="k">light sensor right</td><td class="v" id="r-lr">0</td></tr>
-        <tr><td class="k">light level (screen)</td><td class="v" id="r-lv">0</td></tr>
-        <tr><td class="k">line left / right</td><td class="v" id="r-line">0 / 0</td></tr>
-        <tr><td class="k">sonar</td><td class="v" id="r-son">0 cm</td></tr>
-        <tr><td class="k">compass</td><td class="v" id="r-comp">0&deg;</td></tr>
-        <tr><td class="k">field X / Y / Z</td><td class="v" id="r-mag">0 / 0 / 0</td></tr>
-        <tr><td class="k">motors L / R</td><td class="v" id="r-mot">0 / 0</td></tr>
-        <tr><td class="k">speed</td><td class="v" id="r-spd">0 mm/s</td></tr>
-        <tr><td class="k">battery</td><td class="v" id="r-batt">100%</td></tr>
-        <tr><td class="k">drag vs friction</td><td class="v" id="r-forces">0 / 0 N</td></tr>
-      </table>
-      <div class="bar"><i id="b-ll"></i></div>
-      <div class="bar"><i id="b-lr"></i></div>
-    </div>
-    <div class="panel">
       <h2>micro:bit <span id="mbName" style="float:right;font-weight:700"></span></h2>
       <div class="screen" id="screen"></div>
       <div class="pixrow" id="pix"></div>
@@ -1639,6 +1621,9 @@ function roundRect(x, y, w, h, r) {
    8. Instruments
    ======================================================================== */
 const el = id => document.getElementById(id);
+const put = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+const bar = (id, pct) => { const e = document.getElementById(id); if (e) e.style.width = pct + "%"; };
+
 function instruments() {
   const m = mbit(), b = botOf(m);
   for (let i = 0; i < 25; i++) screenEls[i].classList.toggle("on", !!(m && m.screen[i]));
@@ -1650,27 +1635,27 @@ function instruments() {
   }
   const dash = "\u2014";
   const ll = b ? readLightSensor(b, "L") : 0, lr = b ? readLightSensor(b, "R") : 0;
-  el("r-ll").textContent = b ? ll : dash;
-  el("r-lr").textContent = b ? lr : dash;
-  el("b-ll").style.width = (ll / 1023 * 100) + "%";
-  el("b-lr").style.width = (lr / 1023 * 100) + "%";
-  el("r-lv").textContent = m ? readScreenLight(m) : dash;
-  el("r-line").textContent = b ? readLineSensor(b, "L") + " / " + readLineSensor(b, "R") : dash;
-  el("r-son").textContent = b ? readSonar(b) + " cm" : dash;
-  el("r-comp").textContent = m ? compassHeadingDeg(m) + "\u00b0" : dash;
-  el("r-mag").textContent = m ? magneticForce(m, "x").toFixed(1) + " / " + magneticForce(m, "y").toFixed(1) +
-                                " / " + magneticForce(m, "z").toFixed(0) + " \u00b5T" : dash;
-  el("r-mot").textContent = b ? Math.round(b.lm) + " / " + Math.round(b.rm) : dash;
+  put("r-ll", b ? ll : dash);
+  put("r-lr", b ? lr : dash);
+  bar("b-ll", ll / 1023 * 100);
+  bar("b-lr", lr / 1023 * 100);
+  put("r-lv", m ? readScreenLight(m) : dash);
+  put("r-line", b ? readLineSensor(b, "L") + " / " + readLineSensor(b, "R") : dash);
+  put("r-son", b ? readSonar(b) + " cm" : dash);
+  put("r-comp", m ? compassHeadingDeg(m) + "\u00b0" : dash);
+  put("r-mag", m ? magneticForce(m, "x").toFixed(1) + " / " + magneticForce(m, "y").toFixed(1) +
+                   " / " + magneticForce(m, "z").toFixed(0) + " \u00b5T" : dash);
+  put("r-mot", b ? Math.round(b.lm) + " / " + Math.round(b.rm) : dash);
   const sp = b ? (b.vl + b.vr) / 2 : 0;
-  el("r-spd").textContent = b ? Math.round(sp) + " mm/s" + (slipping ? "  slip!" : "") : dash;
-  el("r-batt").textContent = b ? Math.round(b.batt) + "%" : dash;
-  if (b) el("v-batt").textContent = Math.round(b.batt);
+  put("r-spd", b ? Math.round(sp) + " mm/s" + (slipping ? "  slip!" : "") : dash);
+  put("r-batt", b ? Math.round(b.batt) + "%" : dash);
+  if (b) put("v-batt", Math.round(b.batt));
   const vS = Math.abs(sp) / 1000;
-  el("r-forces").textContent = (PHYS.airOn ? PHYS.dragK * vS * vS : 0).toFixed(4) + " / " +
-                               (PHYS.roll * PHYS.mass * G).toFixed(3) + " N";
+  put("r-forces", (PHYS.airOn ? PHYS.dragK * vS * vS : 0).toFixed(4) + " / " +
+                  (PHYS.roll * PHYS.mass * G).toFixed(3) + " N");
   el("clock").textContent = (simTime / 1000).toFixed(1) + " s";
-  el("mbName").textContent = m ? m.name : dash;
-  if (m) el("mbName").style.color = m.colour;
+  put("mbName", m ? m.name : dash);
+  if (m) { const e = document.getElementById("mbName"); if (e) e.style.color = m.colour; }
 }
 
 /* ---- the strip of boards and bodies, and which goes in which ---- */
@@ -2188,6 +2173,56 @@ const STAGE_CSS = `
 
 const stageOpen = () => !!stageHost && stageHost.classList.contains("on");
 
+/* The gym is two pages: the bench where you build, and the room where it runs.
+   An arrow on either side, or one finger dragged across, moves between them. */
+function showRoomView() { openStage(); }
+function showBenchView() { closeStage(); }
+
+function addArrows() {
+  if (document.getElementById("toRoom")) return;
+  const st = document.createElement("style");
+  st.textContent = `
+    .pager { position: fixed; top: 50%; transform: translateY(-50%); z-index: 45;
+      width: 34px; height: 56px; border-radius: 10px; font-size: 19px; line-height: 1;
+      background: var(--panel-2); border: 1px solid var(--line); color: var(--fg);
+      cursor: pointer; opacity: .75; }
+    .pager:hover { opacity: 1; }
+    #toRoom { right: 6px; }
+    #toBench { left: 6px; display: none; }
+    #stage.on ~ #toRoom, body:has(#stage.on) #toRoom { display: none; }
+    body:has(#stage.on) #toBench { display: block; }`;
+  document.head.appendChild(st);
+  const right = document.createElement("button");
+  right.id = "toRoom"; right.className = "pager"; right.title = "the room and the boards";
+  right.textContent = "\u203a";
+  right.addEventListener("click", showRoomView);
+  const left = document.createElement("button");
+  left.id = "toBench"; left.className = "pager"; left.title = "back to the blocks";
+  left.textContent = "\u2039";
+  left.addEventListener("click", showBenchView);
+  document.body.appendChild(right);
+  document.body.appendChild(left);
+}
+
+// one finger across the page turns the page, unless it started on something
+// that does its own dragging - the room, the editor, a slider or a list
+function swipeStarted(t) {
+  return !!(t.closest && (t.closest("#room") || t.closest("iframe") || t.closest(".cards") ||
+            t.closest("#stageLog") || t.closest("#log") || t.closest("input") ||
+            t.closest("select") || t.closest("textarea") || t.closest("button")));
+}
+let swipe = null;
+document.addEventListener("pointerdown", e => {
+  swipe = swipeStarted(e.target) ? null : { x: e.clientX, y: e.clientY, t: Date.now() };
+}, true);
+document.addEventListener("pointerup", e => {
+  if (!swipe) return;
+  const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+  swipe = null;
+  if (Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
+  if (dx < 0) showRoomView(); else showBenchView();
+}, true);
+
 /* The running view: the room and every board, with the building put away.
    One page, no pop-up windows to be blocked or lost behind the browser. */
 function buildStage() {
@@ -2373,6 +2408,7 @@ if (!loadAll()) {
   world.bots[0].host = world.mbits[0].id;
 }
 placeEveryone();
+addArrows();
 renderDevices();
 draw(); instruments();
 
