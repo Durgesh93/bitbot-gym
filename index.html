@@ -1772,8 +1772,8 @@ document.addEventListener("drop", e => {
 });
 
 
-/* Installing as an app: the browser needs the worker to be registered, and it
-   only works over https or localhost - opening the file directly just skips it. */
+/* Installing as an app: the browser needs the worker registered, and that only
+   works over https or localhost - opening the file directly just skips it. */
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => { }));
 }
@@ -1783,9 +1783,6 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
 furnish();
 draw(); instruments();
 
-document.body.classList.add("wide");
-el("wide").classList.add("on");
-el("wide").textContent = "Normal size";
 startEditor();
 </script>
 </body>
