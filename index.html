@@ -252,6 +252,8 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
         <tr><td class="k">light level (screen)</td><td class="v" id="r-lv">0</td></tr>
         <tr><td class="k">line left / right</td><td class="v" id="r-line">0 / 0</td></tr>
         <tr><td class="k">sonar</td><td class="v" id="r-son">0 cm</td></tr>
+        <tr><td class="k">compass</td><td class="v" id="r-comp">0&deg;</td></tr>
+        <tr><td class="k">field X / Y / Z</td><td class="v" id="r-mag">0 / 0 / 0</td></tr>
         <tr><td class="k">motors L / R</td><td class="v" id="r-mot">0 / 0</td></tr>
         <tr><td class="k">speed</td><td class="v" id="r-spd">0 mm/s</td></tr>
         <tr><td class="k">battery</td><td class="v" id="r-batt">100%</td></tr>
@@ -575,6 +577,31 @@ function readLineSensor(which) {
   const p = sensorPoint(BOT.lineFwd, side);
   return isDark(p.x, p.y) ? 1 : 0;
 }
+/* ---- the Earth's magnetic field -------------------------------------------
+   Over southern Norway the field is about 50 uT but it points steeply DOWN:
+   roughly 72 degrees below horizontal. Only the small horizontal part, some
+   15 uT, is any use for finding north - which is why a compass is so easily
+   upset. North is up the screen; declination tilts true north a little east. */
+const FIELD = { total: 50.5, inclination: 72, declination: 3 };
+
+function compassHeadingDeg() {
+  // heading measured clockwise from north, with north straight up the screen
+  const h = (world.bot.h * 180 / Math.PI + 90 - FIELD.declination) % 360;
+  return Math.round((h + 360) % 360);
+}
+// what the three axes read, in microtesla, for a board lying flat on the robot
+function magneticForce(axis) {
+  const incl = FIELD.inclination * Math.PI / 180;
+  const H = FIELD.total * Math.cos(incl);          // the horizontal part, about 15 uT
+  const Z = FIELD.total * Math.sin(incl);          // the vertical part, about 48 uT, downwards
+  const t = compassHeadingDeg() * Math.PI / 180;
+  const noise = () => (Math.random() - 0.5) * 0.6;
+  if (axis === "x") return Math.round((-H * Math.sin(t) + noise()) * 10) / 10;
+  if (axis === "y") return Math.round((H * Math.cos(t) + noise()) * 10) / 10;
+  if (axis === "z") return Math.round((Z + noise()) * 10) / 10;
+  return Math.round((FIELD.total + noise()) * 10) / 10;
+}
+
 /* ---- sonar: a cone, not a laser, and a wall at a slant sends the ping away --- */
 function rayDistance(ox, oy, ang) {
   const c = Math.cos(ang), s = Math.sin(ang);
@@ -751,6 +778,7 @@ const ENUMS = {
   PlaybackMode: { UntilDone: 0, InBackground: 1, LoopingInBackground: 2 },
   soundExpression: new Proxy({}, { get: (_, k) => String(k) }),
   DisplayMode: { BlackAndWhite: 0 },
+  Dimension: { X: "x", Y: "y", Z: "z", Strength: "s" },
 
   /* ---- the Bit:Bot side, straight from the 4tronix extension ----
      Values are names rather than numbers, so whatever order 4tronix chose
@@ -827,7 +855,10 @@ function makeApi() {
     onGesture: (g, cb) => { handlers[g] = cb; },
     onLogoEvent: (e, cb) => { handlers.logo = cb; },
     acceleration: () => 0,
-    compassHeading: () => Math.round(((world.bot.h * 180 / Math.PI) + 450) % 360),
+    compassHeading: () => compassHeadingDeg(),
+    magneticForce: (dim) => magneticForce(dim),
+    calibrateCompass: () => say("compass calibrated"),
+    isCalibrated: () => true,
     runningTime: () => Math.round(simTime)
   };
   const led = {
@@ -1359,6 +1390,21 @@ function draw() {
 
   drawBot();
 
+  // which way is north
+  const nx = cv.width - 46 * (cv.width / 1100), ny = 46 * (cv.width / 1100), nr = 20 * (cv.width / 1100);
+  ctx.save();
+  ctx.translate(nx, ny);
+  ctx.rotate(-FIELD.declination * Math.PI / 180);
+  ctx.beginPath(); ctx.moveTo(0, -nr); ctx.lineTo(nr * 0.42, nr * 0.5); ctx.lineTo(0, nr * 0.2);
+  ctx.lineTo(-nr * 0.42, nr * 0.5); ctx.closePath();
+  ctx.fillStyle = "rgba(232,87,90,0.85)"; ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = "rgba(255,255,255,0.65)";
+  ctx.font = "bold " + Math.round(12 * (cv.width / 1100)) + "px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("N", nx, ny - nr - 3);
+  ctx.textAlign = "left";
+
   // the walls
   ctx.strokeStyle = "#49536a"; ctx.lineWidth = 6;
   ctx.strokeRect(3, 3, cv.width - 6, cv.height - 6);
@@ -1443,6 +1489,9 @@ function instruments() {
   el("r-lv").textContent = readScreenLight();
   el("r-line").textContent = readLineSensor("L") + " / " + readLineSensor("R");
   el("r-son").textContent = readSonar() + " cm";
+  el("r-comp").textContent = compassHeadingDeg() + "\u00b0";
+  el("r-mag").textContent = magneticForce("x").toFixed(1) + " / " + magneticForce("y").toFixed(1) +
+                            " / " + magneticForce("z").toFixed(0) + " \u00b5T";
   el("r-mot").textContent = Math.round(world.bot.lm) + " / " + Math.round(world.bot.rm);
   const sp = (world.bot.vl + world.bot.vr) / 2;
   el("r-spd").textContent = Math.round(sp) + " mm/s" + (slipping ? "  slip!" : "");
