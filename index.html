@@ -1540,7 +1540,7 @@ function makeApi(m) {
     setLedColor: (rgb) => { b.pixels.fill(cssOf(rgb)); sayd("lights " + nameOfColour(rgb)); },
     setPixelColor: (id, rgb) => { b.pixels[((id % 12) + 12) % 12] = cssOf(rgb); },
     ledClear: () => b.pixels.fill(null),
-    ledBrightness: (b) => { b.pixelBright = clamp(b, 0, 255); },
+    ledBrightness: (level) => { b.pixelBright = clamp(level, 0, 255); },
     ledRainbow: (dir, arm) => {
       const [a, b] = armRange(arm);
       for (let i = a; i < b; i++) b.pixels[i] = "hsl(" + Math.round((i - a) * 300 / (b - a - 1 || 1)) + ",95%,55%)";
@@ -2867,8 +2867,14 @@ window.addEventListener("message", ev => {
       m0.project = msg.project;
       const ts = (msg.project.text || {})["main.ts"];
       if (typeof ts === "string") {
+        /* The editor sends the whole project back every time it saves, and an
+           echo of a project we have just put there can land a second after a
+           program was started. Only pressing Transfer puts the card back to
+           "ready" - comparing the code will not do, because the editor tidies
+           it on the way through and so it never comes back quite the same. */
+        const transferred = !!pendingPull;
         m0.code = ts;
-        m0.state = "ready";
+        if (transferred) { m0.state = "ready"; m0.runFrom = null; m0.runFor = 0; }
         if (pendingPull) { const f = pendingPull; pendingPull = null; f(ts); }
         else if (ts.trim()) say("took the code from your blocks", "say", m0);
       }
@@ -3143,7 +3149,7 @@ async function openHex(file) {
   if (typeof ts !== "string") { say("that project has no main.ts to run", "err"); return; }
   const target = mbit();
   target.code = ts;
-  target.state = "ready";
+  target.state = "ready"; target.runFrom = null; target.runFor = 0;
   say("loaded \"" + (meta.name || file.name) + "\" onto " + target.name, "say", target);
 
   // warn about anything bolted on that the gym has never heard of
