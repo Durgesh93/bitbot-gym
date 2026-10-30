@@ -234,8 +234,9 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
 
   <section class="panel roomwrap">
     <h2>The room <span id="clock" style="float:right;font-family:var(--f-mono);color:var(--muted)">0.0 s</span></h2>
+    <div id="roomHome">
     <canvas id="room" width="1100" height="1100"></canvas>
-    <div class="tools">
+    <div class="tools" id="roomTools">
       <button id="lights" class="on">Room lights: on</button>
       <button id="torch">Torch: off</button>
       <span class="sep"></span>
@@ -250,6 +251,7 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
       <span class="sep"></span>
       <button id="trailBtn" class="on">Trail</button>
       <button id="resetBot">Put robot back</button>
+    </div>
     </div>
     <p class="hint">Shadow Monster learns how bright the room is when you press Run, then sleeps.
     Press <b>Run</b>, wait for the sleepy eyes, then switch the <b>torch</b> on &mdash; that is the jump it is waiting for.
@@ -1919,7 +1921,10 @@ window.addEventListener("message", ev => {
     pendingImport = null;
     if (!tidied) {                      // the editor is up, so take back the space it does not need
       tidied = true;
-      setTimeout(() => sendToEditor("hidesimulator"), 600);
+      setTimeout(() => {
+        sendToEditor("hidesimulator");
+        sendToEditor("setscale", { scale: 1.35 });   // bigger blocks, they are for nine year olds
+      }, 600);
     }
     return;
   }
@@ -2148,8 +2153,11 @@ const STAGE_CSS = `
   #stage .view { flex: 1 1 auto; min-height: 0; display: grid; gap: 12px;
                  grid-template-columns: minmax(0, 42fr) minmax(0, 58fr); }
   #stage .left { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
-  #stage canvas { width: 100%; height: auto; max-width: min(100%, 58vh); margin: 0 auto;
+  #stage canvas { width: 100%; height: auto; max-width: min(100%, 54vh); margin: 0 auto;
                   border-radius: 10px; background: #0d1017; display: block; }
+  #stage .tools { display: flex; flex-wrap: wrap; gap: 6px; }
+  #stage .tools button { padding: 5px 9px; font-size: 11.5px; }
+  #stage .tools .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 3px; }
   #stage .cards { overflow: auto; align-content: start; display: grid; gap: 10px;
                   grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); }
   #stage .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
@@ -2204,13 +2212,12 @@ function buildStage() {
       '<button id="stageBack" class="on">Back to blocks</button>' +
     '</div>' +
     '<div class="view">' +
-      '<div class="left"><canvas id="stageRoom" width="620" height="620"></canvas>' +
+      '<div class="left"><div id="stageRoomSlot"></div><div id="stageToolSlot"></div>' +
       '<div id="stageLog"></div></div>' +
       '<div class="cards" id="stageCardsBox"></div>' +
     '</div>';
   document.body.appendChild(stageHost);
 
-  stageRoom = stageHost.querySelector("#stageRoom");
   stageHost.querySelector("#stageBack").addEventListener("click", closeStage);
   stageHost.querySelector("#stageRun").addEventListener("click", runAll);
   stageHost.querySelector("#stageStop").addEventListener("click", () => stopAll(false));
@@ -2222,6 +2229,9 @@ function buildStage() {
 function openStage() {
   buildStage();
   stageHost.classList.add("on");
+  // borrow the room itself, not a picture of it, so dragging still works
+  stageHost.querySelector("#stageRoomSlot").appendChild(cv);
+  stageHost.querySelector("#stageToolSlot").appendChild(el("roomTools"));
   stageHost.querySelector("#stageSpeed").value = el("speed").value;
   const l = stageHost.querySelector("#stageLog");
   l.innerHTML = "";
@@ -2232,7 +2242,12 @@ function openStage() {
 }
 
 function closeStage() {
-  if (stageHost) stageHost.classList.remove("on");
+  if (!stageHost) return;
+  // give the room and its buttons back to the bench
+  const home = el("roomHome");
+  home.appendChild(cv);
+  home.appendChild(el("roomTools"));
+  stageHost.classList.remove("on");
   draw(); instruments();
 }
 
@@ -2240,7 +2255,9 @@ function closeStage() {
 function syncStage() {
   if (!stageOpen()) return;
   const grid = stageHost.querySelector("#stageCardsBox");
-  const want = world.mbits.map(m => m.id + m.name + m.colour).join(",");
+  const empties = world.bots.filter(b => !hostOf(b));
+  const want = world.mbits.map(m => m.id + m.name + m.colour).join(",") + "|" +
+               empties.map(b => b.id + b.name).join(",");
   if (grid.dataset.ids !== want) {
     grid.dataset.ids = want;
     grid.innerHTML = "";
@@ -2261,10 +2278,26 @@ function syncStage() {
       grid.appendChild(card);
       const f = {};
       card.querySelectorAll("[data-f]").forEach(td => f[td.dataset.f] = td);
-      stageCards.set(m.id, {
+      stageCards.set("m" + m.id, {
         card: card, cells: card.querySelectorAll(".scr span"),
         leds: card.querySelectorAll(".leds i"), where: card.querySelector(".where"), f: f
       });
+    }
+    // and the bodies with nobody driving them
+    for (const b of empties) {
+      const card = document.createElement("div");
+      card.className = "card idle";
+      card.innerHTML =
+        '<div class="top"><i class="dot" style="background:#8d96a6"></i><b>' + b.name +
+        '</b><span class="where">no micro:bit</span></div>' +
+        "<table>" +
+        [["light L / R", "ll"], ["line L / R", "ln"], ["sonar", "sn"], ["battery", "ba"], ["model", "md"]]
+          .map(r => '<tr><td class="k">' + r[0] + '</td><td class="v" data-f="' + r[1] + '">-</td></tr>').join("") +
+        "</table>" + '<div class="leds">' + "<i></i>".repeat(12) + "</div>";
+      grid.appendChild(card);
+      const f = {};
+      card.querySelectorAll("[data-f]").forEach(td => f[td.dataset.f] = td);
+      stageCards.set("b" + b.id, { card: card, leds: card.querySelectorAll(".leds i"), f: f, bot: b });
     }
     // the same chips as the bench, so you can still switch board up here
     const chips = stageHost.querySelector("#stageChips");
@@ -2284,8 +2317,21 @@ function updateStage() {
   if (!stageOpen()) return;
   syncStage();
   const dash = "—";
+  for (const b of world.bots) {
+    const c = stageCards.get("b" + b.id);
+    if (!c) continue;
+    c.f.ll.textContent = readLightSensor(b, "L") + " / " + readLightSensor(b, "R");
+    c.f.ln.textContent = readLineSensor(b, "L") + " / " + readLineSensor(b, "R");
+    c.f.sn.textContent = readSonar(b) + " cm";
+    c.f.ba.textContent = Math.round(b.batt) + "%";
+    c.f.md.textContent = b.model;
+    for (let i = 0; i < 12; i++) {
+      const col = b.pixels[i];
+      c.leds[i].style.background = col && col !== "#000000" ? col : "#2a2f3c";
+    }
+  }
   for (const m of world.mbits) {
-    const c = stageCards.get(m.id);
+    const c = stageCards.get("m" + m.id);
     if (!c) continue;
     const b = botOf(m);
     for (let i = 0; i < 25; i++) c.cells[i].classList.toggle("on", !!m.screen[i]);
@@ -2307,7 +2353,6 @@ function updateStage() {
     }
   }
   stageHost.querySelector("#stageClock").textContent = (simTime / 1000).toFixed(1) + " s";
-  if (stageRoom) stageRoom.getContext("2d").drawImage(cv, 0, 0, stageRoom.width, stageRoom.height);
 }
 
 el("allDev").addEventListener("click", openStage);
