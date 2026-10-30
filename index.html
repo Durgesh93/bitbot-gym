@@ -1774,12 +1774,19 @@ async function runDevice(m) {
   const p0 = placeOf(m);
   m.start = { x: p0.x, y: p0.y, h: p0.h };        // Reset brings it back here
   m.live = true;
+  m.state = "run";
   say("play", "say", m);
   await runOne(m);
-  if (!m.foreverQueue.length) m.live = false;     // it ran to the end and stopped
+  if (!m.foreverQueue.length) {
+    m.live = false;                              // the on start reached its end
+    /* it can still be awake: a button or a radio handler is waiting for
+       something to happen, so the card says "waiting", not "finished".
+       A Stop in the middle already set the state, so leave that alone. */
+    if (m.state === "run") m.state = Object.keys(m.handlers).length ? "wait" : "end";
+  }
 }
 function stopDevice(m) {
-  m.token++; killTimers(m); m.foreverQueue = []; m.live = false;
+  m.token++; killTimers(m); m.foreverQueue = []; m.live = false; m.state = "stop";
   if (m.bot) { m.bot.lm = m.bot.rm = 0; m.bot.brake = true; }
   say("stopped", "say", m);
 }
@@ -1788,7 +1795,7 @@ function stopDevice(m) {
    out, wheels unwound, battery full, standing where Play found it. A child can
    try the same program again and again and see the same thing happen. */
 function resetDevice(m) {
-  m.token++; killTimers(m); m.foreverQueue = []; m.live = false;
+  m.token++; killTimers(m); m.foreverQueue = []; m.live = false; m.state = "ready";
   m.handlers = {}; m.noted = new Set();
   m.held.A = m.held.B = m.held.logo = false; m.beeping = 0;
   m.radioGroup = 0;
@@ -1822,7 +1829,9 @@ function resetAll() {
 
 function stopAll(quiet) {
   running = false;
-  for (const m of world.mbits) { m.token++; killTimers(m); m.foreverQueue = []; m.live = false; }
+  for (const m of world.mbits) {
+    m.token++; killTimers(m); m.foreverQueue = []; m.live = false; m.state = "stop";
+  }
   for (const b of world.bots) { b.lm = b.rm = 0; b.brake = true; }
   if (!quiet) say("stopped", "say");
 }
@@ -2832,6 +2841,7 @@ window.addEventListener("message", ev => {
       const ts = (msg.project.text || {})["main.ts"];
       if (typeof ts === "string") {
         m0.code = ts;
+        m0.state = "ready";
         if (pendingPull) { const f = pendingPull; pendingPull = null; f(ts); }
         else if (ts.trim()) say("took the code from your blocks", "say", m0);
       }
@@ -3106,6 +3116,7 @@ async function openHex(file) {
   if (typeof ts !== "string") { say("that project has no main.ts to run", "err"); return; }
   const target = mbit();
   target.code = ts;
+  target.state = "ready";
   say("loaded \"" + (meta.name || file.name) + "\" onto " + target.name, "say", target);
 
   // warn about anything bolted on that the gym has never heard of
@@ -3180,6 +3191,15 @@ const STAGE_CSS = `
   /* a card brightens, and takes a green edge, while its program runs */
   #stage .card.live { background: #313d52; border-color: var(--go); box-shadow: inset 3px 0 0 var(--go); }
   #stage .card.live .top b { color: #d6ffe6; }
+  /* and it goes dark with a red edge once Stop has been pressed */
+  #stage .card.off { background: #20222b; border-color: #70383d; box-shadow: inset 3px 0 0 var(--stop); }
+  #stage .card.off .top b { color: #eec2c4; }
+  #stage .card.off .scr, #stage .card.off table { opacity: .62; }
+  #stage .st { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700;
+               border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px; color: var(--muted); }
+  #stage .st[data-st="run"] { color: #9ff0c0; border-color: var(--go); }
+  #stage .st[data-st="stop"] { color: #ffb4b7; border-color: var(--stop); }
+  #stage .st[data-st="wait"] { color: #bfe3f5; border-color: rgba(91,192,235,0.5); }
   #stage .top { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
   #stage .top b { font-size: 15px; }
   /* a card is in two halves: what the board feels, then what the robot feels */
@@ -3385,7 +3405,7 @@ function syncStage() {
       card.className = "card";
       card.innerHTML =
         '<div class="top"><i class="dot" style="background:' + m.colour + '"></i><b>' + m.name +
-        '</b><span class="where"></span></div>' +
+        '</b><span class="st"></span><span class="where"></span></div>' +
         '<div class="sect">micro:bit</div>' +
         '<div class="body"><div class="scr">' + "<span></span>".repeat(25) + "</div>" +
         tbl(MB_ROWS) + "</div>" +
@@ -3423,6 +3443,7 @@ function syncStage() {
       stageCards.set("m" + m.id, {
         card: card, cells: card.querySelectorAll(".scr span"),
         leds: card.querySelectorAll(".leds i"), where: card.querySelector(".where"),
+        st: card.querySelector(".st"),
         log: card.querySelector(".mlog"), f: f
       });
     }
@@ -3475,8 +3496,18 @@ function updateStage() {
     const b = botOf(m);
     for (let i = 0; i < 25; i++) c.cells[i].classList.toggle("on", !!m.screen[i]);
     c.where.textContent = m.kind === "bitbot" ? "robot" : "in hand";
-    c.card.classList.toggle("idle", !m.code.trim());
-    c.card.classList.toggle("live", !!m.live);
+    /* Three looks, so a glance tells you where a board is: running is bright
+       with a green edge, stopped goes dark with a red one, and anything else
+       is the plain card. The word beside the name spells it out. */
+    const st = !m.code.trim() ? "none" : m.live ? "run" : m.state || "ready";
+    c.card.classList.toggle("idle", st === "none");
+    c.card.classList.toggle("live", st === "run");
+    c.card.classList.toggle("off", st === "stop");
+    if (c.st.dataset.st !== st) {
+      c.st.dataset.st = st;
+      c.st.textContent = { run: "running", stop: "stopped", wait: "waiting",
+                           end: "finished", ready: "ready", none: "no code" }[st];
+    }
     const set = (k, v) => { if (numbers && c.f[k]) c.f[k].textContent = v; };
     // every reading three digits wide, so nothing jumps about as the numbers change
     const d3 = n => (n < 0 ? "-" : "") + String(Math.abs(Math.round(n))).padStart(3, "0");
