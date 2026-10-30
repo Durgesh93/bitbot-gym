@@ -1,6 +1,6 @@
 /* Keeps the gym itself available offline. The MakeCode panel still needs the
    internet, because that is somebody else's editor living in an iframe. */
-const CACHE = "bitbot-gym-v3";
+const CACHE = "bitbot-gym-v4";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest",
                "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png"];
 
