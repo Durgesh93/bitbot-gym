@@ -165,8 +165,7 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
   <h1>Bit:Bot <span>Gym</span></h1>
   <p class="tag">Write the blocks in MakeCode, copy what its JavaScript tab shows, paste it here, and watch the robot do it. Nobody has to wait for the real one.</p>
   <span class="spacer"></span>
-  <button id="run" class="go">Run</button>
-  <button id="stopBtn" class="stop">Stop</button>
+  <button id="stopBtn" class="stop">Stop all</button>
   <label class="inline">Speed
     <select id="speed">
       <option value="1" selected>1x</option>
@@ -202,9 +201,9 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
           drawers are there. This part needs the internet.</span>
         </div>
       </div>
-      <p class="hint">Build your blocks on the left and press <b>Run</b>. Every time MakeCode saves,
-      the gym takes the code, so Run always plays what you can see. Or press <b>Open a .hex</b>
-      to load a program you have already built.</p>
+      <p class="hint">Build the blocks, press <b>Transfer code</b> to put them on the chosen board,
+      then swipe to the room and press <b>Play</b> on that board's card. Each one runs on its own,
+      so several can run at once. <b>Open a .hex</b> loads a program you have already built.</p>
     </div>
     <textarea id="src" spellcheck="false" hidden></textarea>
   </section>
@@ -756,7 +755,7 @@ function echoToCard(d, m) {
 function echoToStage(d) {
   if (!stageOpen()) return;
   const l = stageHost.querySelector("#stageLog");
-  if (!l) return;
+  if (!l) return;        // the running view keeps its log on the cards now
   l.appendChild(d.cloneNode(true));
   while (l.children.length > 400) l.removeChild(l.firstChild);
   l.scrollTop = l.scrollHeight;
@@ -1384,7 +1383,13 @@ async function runOne(m) {
 /* one board on its own, started from its own card */
 async function runDevice(m) {
   if (!m.code.trim()) { say("nothing on this one yet - transfer some code first", "err", m); return; }
-  if (!running) { running = true; loop(); }
+  if (!running) {                       // the first one to start sets the clock going
+    simTime = 0;
+    log.innerHTML = "";
+    stageCards.forEach(c => { if (c.log) c.log.innerHTML = ""; });
+    running = true;
+    loop();
+  }
   say("play", "say", m);
   await runOne(m);
 }
@@ -1392,25 +1397,6 @@ function stopDevice(m) {
   m.token++; killTimers(m); m.foreverQueue = [];
   if (m.bot) { m.bot.lm = m.bot.rm = 0; m.bot.brake = true; }
   say("stopped", "say", m);
-}
-
-async function runAll() {
-  stopAll(true);
-  running = true;
-  simTime = 0;
-  log.innerHTML = "";
-  if (stageOpen()) {
-    stageHost.querySelector("#stageLog").innerHTML = "";
-    stageCards.forEach(c => { if (c.log) c.log.innerHTML = ""; });
-  }
-  const live = world.mbits.filter(m => m.code.trim());
-  if (!live.length) {
-    say("nothing to run yet - build some blocks, or open a .hex", "err");
-    running = false; return;
-  }
-  loop();
-  say("run: " + live.map(m => m.name).join(", "), "say");
-  await Promise.all(live.map(m => runOne(m)));
 }
 
 function stopAll(quiet) {
@@ -1863,7 +1849,7 @@ function canvasToMm(ev) {
   return { x: (ev.clientX - r.left) / r.width * ROOM, y: (ev.clientY - r.top) / r.height * ROOM };
 }
 cv.addEventListener("pointerdown", ev => {
-  cv.setPointerCapture(ev.pointerId);
+  try { cv.setPointerCapture(ev.pointerId); } catch (e) { /* some pointers cannot be captured */ }
   const p = canvasToMm(ev);
   if (tool === "pen" || tool === "erase") { dragging = { kind: tool, last: p }; paint(p, p); return; }
   for (const b of world.bots) {
@@ -1876,7 +1862,7 @@ cv.addEventListener("pointerdown", ev => {
     if (Math.abs(p.x - m.x) < 40 && Math.abs(p.y - m.y) < 34) { dragging = { kind: "board", m: m }; return; }
   }
   for (const L of world.lamps) {
-    if (Math.hypot(p.x - L.x, p.y - L.y) < 70) { dragging = { kind: "torch", lamp: L, moved: false }; return; }
+    if (Math.hypot(p.x - L.x, p.y - L.y) < 95) { dragging = { kind: "torch", lamp: L, moved: false }; return; }
   }
   for (let i = world.boxes.length - 1; i >= 0; i--) {
     const bx = world.boxes[i];
@@ -1999,7 +1985,6 @@ el("wide").addEventListener("click", e => {
   e.target.classList.toggle("on", big);
   e.target.textContent = big ? "Small blocks" : "Big blocks";
 });
-el("run").addEventListener("click", () => { openStage(); runAll(); });
 el("stopBtn").addEventListener("click", () => stopAll(false));
 
 /* ========================================================================
@@ -2425,10 +2410,10 @@ const STAGE_CSS = `
   #stage .bar .clock { font-family: var(--f-mono); color: var(--muted); font-size: 13px; }
   #stage .bar .spacer { flex: 1; }
   #stage .view { flex: 1 1 auto; min-height: 0; display: grid; gap: 12px;
-                 grid-template-columns: minmax(0, 42fr) minmax(0, 58fr); }
+                 grid-template-columns: minmax(0, 54fr) minmax(0, 46fr); }
   #stage .left { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
   #stage .left h1 { margin: 2px 0 0; }
-  #stage canvas { width: 100%; height: auto; max-width: min(100%, 44vh); margin: 0 auto;
+  #stage canvas { width: 100%; height: auto; max-width: min(100%, 76vh); margin: 0 auto;
                   border-radius: 10px; background: #0d1017; display: block; }
   #stage .tools { display: flex; flex-wrap: wrap; gap: 6px; }
   #stage .tools button { padding: 5px 9px; font-size: 11.5px; }
@@ -2455,7 +2440,7 @@ const STAGE_CSS = `
   #stage .arms { display: flex; gap: 14px; margin-top: 8px; }
   #stage .arms > div { display: flex; align-items: center; gap: 5px; }
   #stage .arms b { font-size: 10px; color: var(--muted); font-weight: 600; }
-  #stage .mlog { margin-top: 8px; height: 72px; overflow: auto; background: #0d1017;
+  #stage .mlog { margin-top: 8px; height: 86px; overflow: auto; background: #0d1017;
       border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px;
       font-family: var(--f-mono); font-size: 10.5px; line-height: 1.5; color: #c6d2e4; }
   #stage .mlog div { white-space: pre-wrap; }
@@ -2549,22 +2534,19 @@ function buildStage() {
       '<span class="clock" id="stageClock">0.0 s</span>' +
       '<span id="stageChips" style="display:flex;gap:6px;flex-wrap:wrap"></span>' +
       '<span class="spacer"></span>' +
-      '<button id="stageRun" class="go">Run</button>' +
-      '<button id="stageStop" class="stop">Stop</button>' +
+      '<button id="stageStop" class="stop">Stop all</button>' +
       '<label class="inline">Speed <select id="stageSpeed">' +
         '<option value="1">1x</option><option value="2">2x</option>' +
         '<option value="4">4x</option><option value="8">8x</option></select></label>' +
       '<button id="stageBack" class="on">Back to blocks</button>' +
     '</div>' +
     '<div class="view">' +
-      '<div class="left"><div id="stageRoomSlot"></div><div id="stageToolSlot"></div>' +
-      '<h1 style="margin-top:12px">Program log</h1><div id="stageLog"></div></div>' +
+      '<div class="left"><div id="stageRoomSlot"></div><div id="stageToolSlot"></div></div>' +
       '<div class="cards" id="stageCardsBox"></div>' +
     '</div>';
   document.body.appendChild(stageHost);
 
   stageHost.querySelector("#stageBack").addEventListener("click", closeStage);
-  stageHost.querySelector("#stageRun").addEventListener("click", runAll);
   stageHost.querySelector("#stageStop").addEventListener("click", () => stopAll(false));
   const sp = stageHost.querySelector("#stageSpeed");
   sp.value = el("speed").value;
@@ -2584,10 +2566,6 @@ function openStage() {
   stageHost.querySelector("#stageRoomSlot").appendChild(cv);
   stageHost.querySelector("#stageToolSlot").appendChild(el("roomTools"));
   stageHost.querySelector("#stageSpeed").value = el("speed").value;
-  const l = stageHost.querySelector("#stageLog");
-  l.innerHTML = "";
-  for (const d of log.children) l.appendChild(d.cloneNode(true));
-  l.scrollTop = l.scrollHeight;
   stageCards = new Map();
   syncStage(); updateStage();
   requestAnimationFrame(stageTick);
