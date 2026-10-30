@@ -3190,7 +3190,7 @@ const STAGE_CSS = `
   #stage .tools button { padding: 5px 9px; font-size: 11.5px; }
   #stage .tools .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 3px; }
   #stage .cards { overflow: auto; align-content: start; display: grid; gap: 10px;
-                  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); }
+                  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
   #stage .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
   #stage .card.idle { opacity: .5; }
   /* a card brightens, and takes a green edge, while its program runs */
@@ -3228,7 +3228,7 @@ const STAGE_CSS = `
   #stage .scr span.on { background: var(--led-on); box-shadow: 0 0 5px var(--led-on); }
   #stage table { border-collapse: collapse; width: 100%; font-size: 11.5px; }
   #stage td { padding: 1px 0; }
-  #stage td.k { color: var(--muted); padding-right: 6px; }
+  #stage td.k { color: var(--muted); padding-right: 6px; white-space: nowrap; }
   #stage td.v { white-space: nowrap; }
   #stage td.v { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
   #stage .leds { display: flex; gap: 3px; margin-top: 7px; }
