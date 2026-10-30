@@ -17,7 +17,10 @@ const RULES = {
   world:    ["core", "hardware"],
   api:      ["core", "hardware"],
   app:      ["core", "hardware", "world", "api"],
-  ui:       ["core", "app"],
+  /* ui may reach the renderer: it is a view too, and a canvas painted
+     sixty times a second is not something React should be doing. It may
+     NOT reach the world or the hardware. */
+  ui:       ["core", "app", "room", "world/scenes"],
   room:     ["core", "app"],
   tools:    ["core", "hardware", "world", "api", "app", "room"]   // dev tools: rulers, not the gym
 };
