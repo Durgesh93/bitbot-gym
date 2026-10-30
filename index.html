@@ -108,6 +108,7 @@ canvas#room { width: 100%; height: auto; aspect-ratio: 1/1; display: block; bord
 .toprow .panel { padding: 10px 12px; }
 .toprow #log { height: 128px; }
 @media (max-height: 940px) { .toprow #log { height: 96px; } .toprow .panel { padding: 8px 10px; } }
+@media (max-height: 820px) { .instr { gap: 8px; } .instr .panel { padding: 9px 11px; } .pixrow { margin-top: 6px; } }
 .toprow .sliders { gap: 2px; font-size: 11.5px; }
 .toprow .sliders input[type=range] { height: 14px; margin: 0; }
 .toprow .sliders { grid-template-columns: 150px 1fr; align-items: center; }
@@ -119,7 +120,7 @@ canvas#room { width: 100%; height: auto; aspect-ratio: 1/1; display: block; bord
 .toprow #invert { margin-top: 6px !important; font-size: 11.5px; padding: 5px 10px; }
 .toprow .inline { font-size: 11.5px; }
 @media (max-width: 900px) { .toprow { grid-template-columns: 1fr; } }
-.screen { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; background: #08080c; border-radius: 9px; padding: 9px; width: 130px; margin: 0 auto; }
+.screen { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; background: #08080c; border-radius: 9px; padding: 8px; width: min(130px, 19vh); margin: 0 auto; }
 .screen span { aspect-ratio: 1/1; border-radius: 2px; background: var(--led-off); }
 .screen span.on { background: var(--led-on); box-shadow: 0 0 6px var(--led-on); }
 .pixrow { display: flex; justify-content: center; gap: 4px; margin-top: 8px; }
@@ -244,18 +245,6 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
 
   <aside class="instr">
     <div class="panel">
-      <h2>micro:bit</h2>
-      <div class="screen" id="screen"></div>
-      <div class="pixrow" id="pix"></div>
-      <div class="mbtns" style="margin-top:10px">
-        <button data-press="A">A</button>
-        <button data-press="B">B</button>
-        <button data-press="AB">A+B</button>
-        <button data-press="shake">Shake</button>
-      </div>
-    </div>
-
-    <div class="panel">
       <h2>What the robot senses</h2>
       <table class="read">
         <tr><td class="k">light sensor left</td><td class="v" id="r-ll">0</td></tr>
@@ -271,6 +260,18 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
       <div class="bar"><i id="b-ll"></i></div>
       <div class="bar"><i id="b-lr"></i></div>
     </div>
+    <div class="panel">
+      <h2>micro:bit</h2>
+      <div class="screen" id="screen"></div>
+      <div class="pixrow" id="pix"></div>
+      <div class="mbtns" style="margin-top:10px">
+        <button data-press="A">A</button>
+        <button data-press="B">B</button>
+        <button data-press="AB">A+B</button>
+        <button data-press="shake">Shake</button>
+      </div>
+    </div>
+
 
 
   </aside>
