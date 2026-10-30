@@ -81,6 +81,15 @@ body.wide iframe#editor, body.wide .editor-off { height: 700px; }
 /* code side */
 .tabs { display: flex; gap: 6px; margin-bottom: 9px; }
 .devices { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+/* the little cable that carries the program to the board */
+#wire { position: relative; height: 22px; margin: 0 0 8px; border-radius: 11px;
+        background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
+#wire i { position: absolute; top: 50%; left: 0; width: 34px; height: 4px; margin-top: -2px;
+          border-radius: 2px; background: linear-gradient(90deg, transparent, var(--go), transparent);
+          animation: down-the-wire 1s linear infinite; }
+#wire b { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+          font-size: 11.5px; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
+@keyframes down-the-wire { from { left: -40px; } to { left: 100%; } }
 .chip {
   display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
   padding: 5px 10px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--panel-2);
@@ -183,8 +192,9 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
         <button id="addMbit">Add micro:bit</button>
         <button id="renameDev">Rename</button>
         <button id="delDev">Remove</button>
-        <button id="pullCode" class="go">Take the code &amp; run</button>
+        <button id="pullCode" class="go">Transfer code</button>
       </div>
+      <div id="wire" hidden><i></i><b></b></div>
       <div id="editorSlot">
         <div class="editor-off">
           <b style="color:var(--fg);font-size:15px">Starting MakeCode&hellip;</b>
@@ -205,7 +215,9 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
     <canvas id="room" width="1100" height="1100"></canvas>
     <div class="tools" id="roomTools">
       <button id="lights" class="on">Room lights: on</button>
-      <button id="torch">Torch: off</button>
+      <button id="addLamp">Add light</button>
+      <button id="delLamp">Remove light</button>
+      <button id="torch">All torches off</button>
       <span class="sep"></span>
       <button data-tool="move" class="on">Drag things</button>
       <button data-tool="pen">Draw line</button>
@@ -218,6 +230,11 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
       <span class="sep"></span>
       <button id="trailBtn" class="on">Trail</button>
       <button id="resetBot">Put robot back</button>
+      <span class="sep"></span>
+      <button data-view="plain" class="on">Plain</button>
+      <button data-view="light">Light map</button>
+      <button data-view="magnetic">Magnetic</button>
+      <button data-view="sonar">Sonar</button>
     </div>
     </div>
     <div class="toprow">
@@ -326,7 +343,9 @@ function makeDevice(kind, name, colour, x, y) {
 
 const world = {
   mbits: [], bots: [], sel: 0,
-  lights: { room: true, torch: false, tx: 1680, ty: 1720, cx: 1000, cy: 1000, H: 2400 },
+  lights: { room: true, cx: 1000, cy: 1000, H: 2400 },
+  lamps: [{ x: 1680, y: 1720, on: false }],
+  view: "plain",
   boxes: [],
   showTrail: true
 };
@@ -425,6 +444,7 @@ function physics(dt) {
   const h = dt / 1000;
   slipping = false;
   for (const b of world.bots) {
+    if (b.held) { b.vl = b.vr = 0; continue; }     // you have picked it up, so it waits
     const L = wheelAccel(b, b.vl, b.lm, "L");
     const R = wheelAccel(b, b.vr, b.rm, "R");
     if (L.slip || R.slip) slipping = true;
@@ -535,23 +555,24 @@ function pointInPoly(x, y, poly) {
    the furniture-only set is what the sensors read. The robot is in the first
    but not the second - its own shadow must not fall on its own eyes. */
 let shadowsStale = true;
-let SHADOWS = { room: [], torch: [] };        // for drawing: furniture and every robot
-let SEEN = { room: [], torch: [] };           // for sensing: the same, tagged with who cast it
+let SHADOWS = { room: [], lamps: [] };        // for drawing: furniture and every robot
+let SEEN = { room: [], lamps: [] };           // for sensing: the same, tagged with who cast it
 function buildShadows() {
   const ceil = { x: world.lights.cx, y: world.lights.cy, H: world.lights.H };
-  const torch = { x: world.lights.tx, y: world.lights.ty, H: 110 };
   const casters = world.boxes.map(bx => ({ box: bx, owner: null })).concat(
     world.bots.map(b => ({
       box: { x: b.x - BOT.radius, y: b.y - BOT.radius, w: BOT.radius * 2, h: BOT.radius * 2, z: 95 },
       owner: b
     })));
   SEEN.room = world.lights.room ? casters.map(c => ({ poly: shadowQuad(c.box, ceil), owner: c.owner })) : [];
-  SEEN.torch = world.lights.torch ? casters.map(c => ({ poly: shadowQuad(c.box, torch), owner: c.owner })) : [];
+  SEEN.lamps = world.lamps.map(L => L.on
+    ? casters.map(c => ({ poly: shadowQuad(c.box, { x: L.x, y: L.y, H: 110 }), owner: c.owner })) : []);
   SHADOWS.room = SEEN.room.map(e => e.poly);
-  SHADOWS.torch = SEEN.torch.map(e => e.poly);
+  SHADOWS.lamps = SEEN.lamps.map(set => set.map(e => e.poly));
 }
 function inShadow(x, y, which, self) {
-  for (const e of SEEN[which]) {
+  const set = which === "room" ? SEEN.room : (SEEN.lamps[which] || []);
+  for (const e of set) {
     if (e.owner && e.owner === self) continue;    // your own shadow is not on your own sensors
     if (pointInPoly(x, y, e.poly)) return true;
   }
@@ -559,8 +580,9 @@ function inShadow(x, y, which, self) {
 }
 function lampsOn() {
   const out = [];
-  if (world.lights.torch)
-    out.push({ key: "torch", x: world.lights.tx, y: world.lights.ty, I: cfg.torch / 1000, H: 110 });
+  world.lamps.forEach((L, i) => {
+    if (L.on) out.push({ key: i, x: L.x, y: L.y, I: cfg.torch / 1000, H: 110 });
+  });
   if (world.lights.room)
     out.push({ key: "room", x: world.lights.cx, y: world.lights.cy, I: 3.2, H: world.lights.H });
   return out;
@@ -1359,6 +1381,19 @@ async function runOne(m) {
   }
 }
 
+/* one board on its own, started from its own card */
+async function runDevice(m) {
+  if (!m.code.trim()) { say("nothing on this one yet - transfer some code first", "err", m); return; }
+  if (!running) { running = true; loop(); }
+  say("play", "say", m);
+  await runOne(m);
+}
+function stopDevice(m) {
+  m.token++; killTimers(m); m.foreverQueue = [];
+  if (m.bot) { m.bot.lm = m.bot.rm = 0; m.bot.brake = true; }
+  say("stopped", "say", m);
+}
+
 async function runAll() {
   stopAll(true);
   running = true;
@@ -1419,6 +1454,117 @@ async function loop() {
 const cv = document.getElementById("room"), ctx = cv.getContext("2d");
 const S = cv.width / ROOM;
 
+/* ---- the three ways of looking at the room ------------------------------
+   A light map is worth more than a number: the children can see the pool a
+   torch makes, the shadow a sofa throws, and why a sensor reads what it
+   reads. Sampled on a grid, the same illuminance the sensors use. */
+const HEAT_N = 44;
+const heat = document.createElement("canvas");
+heat.width = heat.height = HEAT_N;
+const hctx = heat.getContext("2d");
+let heatAt = 0, heatStale = true;
+
+function heatColour(t) {
+  // dark blue, violet, orange, pale yellow - dark is dim, pale is bright
+  const stops = [[10, 14, 40], [70, 30, 120], [190, 60, 90], [255, 150, 40], [255, 240, 170]];
+  const u = clamp(t, 0, 1) * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(u)), f = u - i;
+  return [0, 1, 2].map(k => Math.round(stops[i][k] + (stops[i + 1][k] - stops[i][k]) * f));
+}
+
+function buildHeat() {
+  const img = hctx.createImageData(HEAT_N, HEAT_N);
+  const vals = new Float32Array(HEAT_N * HEAT_N);
+  let max = 1e-6;
+  for (let j = 0; j < HEAT_N; j++) {
+    for (let i = 0; i < HEAT_N; i++) {
+      const e = illuminance((i + 0.5) * ROOM / HEAT_N, (j + 0.5) * ROOM / HEAT_N, null, null);
+      vals[j * HEAT_N + i] = e;
+      if (e > max) max = e;
+    }
+  }
+  for (let k = 0; k < vals.length; k++) {
+    const c = heatColour(Math.pow(vals[k] / max, 0.45));
+    img.data[k * 4] = c[0]; img.data[k * 4 + 1] = c[1]; img.data[k * 4 + 2] = c[2];
+    img.data[k * 4 + 3] = 215;
+  }
+  hctx.putImageData(img, 0, 0);
+  heatStale = false; heatAt = Date.now();
+}
+
+function drawLightMap() {
+  if (heatStale || Date.now() - heatAt > 220) buildHeat();
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(heat, 0, 0, cv.width, cv.height);
+  overlayNote("Light map - pale is bright, dark is shadow. The same numbers the light sensors read.");
+}
+
+// the Earth's field is the same everywhere in a room, and that is the point
+function drawMagneticMap() {
+  ctx.fillStyle = "rgba(10,12,20,0.72)"; ctx.fillRect(0, 0, cv.width, cv.height);
+  const step = cv.width / 9, ang = -Math.PI / 2 - FIELD.declination * Math.PI / 180;
+  ctx.strokeStyle = "rgba(91,192,235,0.85)"; ctx.fillStyle = "rgba(91,192,235,0.85)";
+  ctx.lineWidth = 1.6;
+  for (let y = step / 2; y < cv.height; y += step) {
+    for (let x = step / 2; x < cv.width; x += step) {
+      const len = step * 0.3, dx = Math.cos(ang) * len, dy = Math.sin(ang) * len;
+      ctx.beginPath(); ctx.moveTo(x - dx, y - dy); ctx.lineTo(x + dx, y + dy); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x + dx, y + dy);
+      ctx.lineTo(x + dx - dy * 0.3 - dx * 0.3, y + dy + dx * 0.3 - dy * 0.3);
+      ctx.lineTo(x + dx + dy * 0.3 - dx * 0.3, y + dy - dx * 0.3 - dy * 0.3);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  overlayNote("Magnetic field: " + FIELD.total + " \u00b5T, " + FIELD.inclination +
+              "\u00b0 below horizontal, so only " +
+              (FIELD.total * Math.cos(FIELD.inclination * Math.PI / 180)).toFixed(1) +
+              " \u00b5T is horizontal. The same everywhere - only the robot's heading changes.");
+}
+
+// the sonar cone, ray by ray, and what comes back
+function drawSonarMap() {
+  ctx.fillStyle = "rgba(10,12,20,0.55)"; ctx.fillRect(0, 0, cv.width, cv.height);
+  for (const b of world.bots) {
+    const c = Math.cos(b.h), sn = Math.sin(b.h);
+    const ox = b.x + c * BOT.sonarFwd, oy = b.y + sn * BOT.sonarFwd;
+    let best = Infinity;
+    for (let i = -3; i <= 3; i++) {
+      const a = b.h + i * 0.044;
+      const d = rayDistance(ox, oy, a);
+      const far = isFinite(d) ? d : 2400;
+      ctx.strokeStyle = isFinite(d) ? "rgba(91,192,235,0.55)" : "rgba(232,87,90,0.35)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(ox * S, oy * S);
+      ctx.lineTo((ox + Math.cos(a) * far) * S, (oy + Math.sin(a) * far) * S);
+      ctx.stroke();
+      if (isFinite(d)) {
+        ctx.beginPath();
+        ctx.arc((ox + Math.cos(a) * d) * S, (oy + Math.sin(a) * d) * S, 3 * S, 0, 7);
+        ctx.fillStyle = "rgba(91,192,235,0.9)"; ctx.fill();
+        if (d < best) best = d;
+      }
+    }
+    const cm = readSonar(b);
+    nameBubble(cm === 0 ? "nothing within 2 m" : cm + " cm",
+               ox * S, (oy - 90) * S, cm === 0 ? "#e8575a" : "#5bc0eb");
+  }
+  overlayNote("Sonar: a 15\u00b0 cone of pings. Red rays found nothing or hit too steep an angle to echo back.");
+}
+
+function overlayNote(text) {
+  const f = Math.round(12 * (cv.width / 1100));
+  ctx.font = "600 " + f + "px system-ui, sans-serif";
+  const w = ctx.measureText(text).width + f * 1.4, h = f * 2.2;
+  ctx.fillStyle = "rgba(13,16,23,0.9)";
+  roundRect(10, cv.height - h - 10, w, h, h * 0.35); ctx.fill();
+  ctx.fillStyle = "#dfe7f3";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 10 + f * 0.7, cv.height - h / 2 - 10);
+  ctx.textBaseline = "alphabetic";
+}
+
 function draw() {
   buildShadows(); shadowsStale = false;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1438,10 +1584,10 @@ function draw() {
     ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height);
   }
 
-  // the torch: a tight pool, because it is down on the floor
-  if (world.lights.torch) {
-    const g = ctx.createRadialGradient(world.lights.tx * S, world.lights.ty * S, 4,
-                                       world.lights.tx * S, world.lights.ty * S, 760 * S);
+  // each torch: a tight pool, because it is down on the floor
+  for (const L of world.lamps) {
+    if (!L.on) continue;
+    const g = ctx.createRadialGradient(L.x * S, L.y * S, 4, L.x * S, L.y * S, 760 * S);
     g.addColorStop(0, "rgba(255,230,150,0.62)");
     g.addColorStop(0.4, "rgba(255,210,120,0.20)");
     g.addColorStop(1, "rgba(255,200,100,0)");
@@ -1462,7 +1608,10 @@ function draw() {
     }
   };
   paint(SHADOWS.room, 0.26);
-  paint(SHADOWS.torch, 0.42);
+  for (const set of SHADOWS.lamps) paint(set, 0.42);
+
+  if (world.view === "light") drawLightMap();
+  if (world.view === "magnetic") drawMagneticMap();
 
   // the furniture
   for (const b of world.boxes) {
@@ -1510,14 +1659,17 @@ function draw() {
     ctx.fillStyle = "#fff3cf"; ctx.fill();
   }
 
-  // the torch, dim but still there when it is switched off
-  ctx.beginPath(); ctx.arc(world.lights.tx * S, world.lights.ty * S, 15 * S, 0, 7);
-  ctx.fillStyle = world.lights.torch ? "#ffd76a" : "#4a4738";
-  ctx.fill();
-  ctx.strokeStyle = world.lights.torch ? "#6b5a2a" : "#5a5a4a"; ctx.lineWidth = 2; ctx.stroke();
+  // the torches, dim but still there when switched off
+  for (const L of world.lamps) {
+    ctx.beginPath(); ctx.arc(L.x * S, L.y * S, 15 * S, 0, 7);
+    ctx.fillStyle = L.on ? "#ffd76a" : "#4a4738";
+    ctx.fill();
+    ctx.strokeStyle = L.on ? "#6b5a2a" : "#5a5a4a"; ctx.lineWidth = 2; ctx.stroke();
+  }
 
   for (const b of world.bots) drawBot(b);
   for (const m of world.mbits) if (!botOf(m)) drawBoard(m);
+  if (world.view === "sonar") drawSonarMap();
 
   // which way is north
   const nx = cv.width - 46 * (cv.width / 1100), ny = 46 * (cv.width / 1100), nr = 20 * (cv.width / 1100);
@@ -1716,14 +1868,16 @@ cv.addEventListener("pointerdown", ev => {
   if (tool === "pen" || tool === "erase") { dragging = { kind: tool, last: p }; paint(p, p); return; }
   for (const b of world.bots) {
     const nose = { x: b.x + Math.cos(b.h) * 75, y: b.y + Math.sin(b.h) * 75 };
-    if (Math.hypot(p.x - nose.x, p.y - nose.y) < 45) { dragging = { kind: "spin", bot: b }; return; }
-    if (Math.hypot(p.x - b.x, p.y - b.y) < BOT.radius + 10) { dragging = { kind: "bot", bot: b }; return; }
+    if (Math.hypot(p.x - nose.x, p.y - nose.y) < 45) { b.held = true; dragging = { kind: "spin", bot: b }; return; }
+    if (Math.hypot(p.x - b.x, p.y - b.y) < BOT.radius + 10) { b.held = true; dragging = { kind: "bot", bot: b }; return; }
   }
   for (const m of world.mbits) {
     if (botOf(m)) continue;
     if (Math.abs(p.x - m.x) < 40 && Math.abs(p.y - m.y) < 34) { dragging = { kind: "board", m: m }; return; }
   }
-  if (Math.hypot(p.x - world.lights.tx, p.y - world.lights.ty) < 70) { dragging = { kind: "torch" }; return; }
+  for (const L of world.lamps) {
+    if (Math.hypot(p.x - L.x, p.y - L.y) < 70) { dragging = { kind: "torch", lamp: L, moved: false }; return; }
+  }
   for (let i = world.boxes.length - 1; i >= 0; i--) {
     const bx = world.boxes[i];
     if (p.x > bx.x && p.x < bx.x + bx.w && p.y > bx.y && p.y < bx.y + bx.h) {
@@ -1735,14 +1889,25 @@ cv.addEventListener("pointermove", ev => {
   if (!dragging) return;
   const p = canvasToMm(ev);
   if (dragging.kind === "pen" || dragging.kind === "erase") { paint(dragging.last, p); dragging.last = p; }
-  else if (dragging.kind === "torch") { world.lights.tx = p.x; world.lights.ty = p.y; }
+  else if (dragging.kind === "torch") {
+    if (Math.hypot(p.x - dragging.lamp.x, p.y - dragging.lamp.y) > 12) dragging.moved = true;
+    dragging.lamp.x = p.x; dragging.lamp.y = p.y;
+  }
   else if (dragging.kind === "bot") { dragging.bot.x = p.x; dragging.bot.y = p.y; dragging.bot.trail.length = 0; }
   else if (dragging.kind === "spin") { dragging.bot.h = Math.atan2(p.y - dragging.bot.y, p.x - dragging.bot.x); }
   else if (dragging.kind === "board") { dragging.m.x = p.x; dragging.m.y = p.y; }
   else if (dragging.kind === "box") { dragging.box.x = p.x - dragging.dx; dragging.box.y = p.y - dragging.dy; }
   if (!running) { draw(); instruments(); }
 });
-cv.addEventListener("pointerup", () => { if (dragging && (dragging.kind === "pen" || dragging.kind === "erase")) refreshFloor(); dragging = null; });
+cv.addEventListener("pointerup", () => {
+  if (dragging) {
+    if (dragging.kind === "pen" || dragging.kind === "erase") refreshFloor();
+    if (dragging.bot) dragging.bot.held = false;
+    if (dragging.lamp && !dragging.moved) dragging.lamp.on = !dragging.lamp.on;   // a tap switches it
+  }
+  dragging = null;
+  draw();
+});
 
 function paint(a, b) {
   fctx.globalCompositeOperation = tool === "erase" ? "destination-out" : "source-over";
@@ -1758,6 +1923,12 @@ function paint(a, b) {
   if (!running) draw();
 }
 
+document.querySelectorAll("[data-view]").forEach(btn => btn.addEventListener("click", () => {
+  world.view = btn.dataset.view;
+  heatStale = true;
+  document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", b === btn));
+  draw();
+}));
 document.querySelectorAll("[data-tool]").forEach(btn => btn.addEventListener("click", () => {
   tool = btn.dataset.tool;
   document.querySelectorAll("[data-tool]").forEach(b => b.classList.toggle("on", b === btn));
@@ -1769,10 +1940,21 @@ el("lights").addEventListener("click", e => {
   if (!running) { draw(); instruments(); }
 });
 el("torch").addEventListener("click", e => {
-  world.lights.torch = !world.lights.torch;
-  e.target.textContent = "Torch: " + (world.lights.torch ? "on" : "off");
-  e.target.classList.toggle("on", world.lights.torch);
-  if (!running) { draw(); instruments(); }
+  const anyOn = world.lamps.some(L => L.on);
+  world.lamps.forEach(L => L.on = !anyOn);
+  e.target.textContent = anyOn ? "All torches off" : "All torches on";
+  e.target.classList.toggle("on", !anyOn);
+  heatStale = true; draw(); instruments();
+});
+el("addLamp").addEventListener("click", () => {
+  if (world.lamps.length >= 6) return;
+  world.lamps.push({ x: 400 + world.lamps.length * 220, y: 1800, on: true });
+  heatStale = true; draw(); instruments();
+});
+el("delLamp").addEventListener("click", () => {
+  if (world.lamps.length <= 1) return;
+  world.lamps.pop();
+  heatStale = true; draw(); instruments();
 });
 el("clearLine").addEventListener("click", () => { fctx.clearRect(0, 0, FLOOR_N, FLOOR_N); refreshFloor(); draw(); });
 el("addBox").addEventListener("click", () => {
@@ -1928,14 +2110,26 @@ window.addEventListener("message", ev => {
   }
 });
 
+// take what MakeCode has and put it on the selected board, the way you would flash it
 async function pullCode() {
   if (!editorFrame) { startEditor(); return; }
+  const m = mbit();
+  const wire = el("wire");
+  wire.hidden = false;
+  wire.querySelector("b").textContent = "transferring to " + m.name + "\u2026";
+  const started = Date.now();
   await new Promise(res => {
     pendingPull = res;
     sendToEditor("saveproject");
     setTimeout(() => { if (pendingPull === res) { pendingPull = null; res(null); } }, 4000);
   });
-  runAll();
+  await new Promise(r => setTimeout(r, Math.max(0, 900 - (Date.now() - started))));
+  wire.hidden = true;
+  saveAll();
+  if (m.code.trim()) say("code transferred to " + m.name + " - press play on its card", "say", m);
+  else say("MakeCode has not given us any blocks yet", "err", m);
+  renderDevices();
+  if (stageOpen()) { stageCards = new Map(); syncStage(); updateStage(); }
 }
 
 /* ========================================================================
@@ -2096,6 +2290,7 @@ el("renameDev").addEventListener("click", () => {
   renderDevices(); draw(); instruments(); saveAll();
   if (stageOpen()) { stageCards = new Map(); syncStage(); updateStage(); }
 });
+el("pullCode").addEventListener("click", pullCode);
 el("addBot").addEventListener("click", () => addDevice("bitbot"));
 el("addMbit").addEventListener("click", () => addDevice("microbit"));
 el("delDev").addEventListener("click", () => {
@@ -2268,6 +2463,8 @@ const STAGE_CSS = `
   #stage .mlog div.say { color: var(--warn); }
   #stage .press { display: flex; gap: 4px; margin-top: 8px; }
   #stage .press button { flex: 1; padding: 4px 2px; font-size: 11px; }
+  #stage .press.run button[data-go="1"] { background: var(--go); border-color: var(--go); color: #06281a; font-weight: 700; }
+  #stage .press.run button[data-go="0"] { background: var(--stop); border-color: var(--stop); color: #2b0708; font-weight: 700; }
   #stage #stageLog { flex: 1 1 auto; min-height: 90px; overflow: auto; background: #0d1017;
       border: 1px solid var(--line); border-radius: 10px; padding: 9px;
       font-family: var(--f-mono); font-size: 11.5px; line-height: 1.55; color: #c6d2e4; }
@@ -2430,11 +2627,16 @@ function syncStage() {
         "</table></div>" +
         ARMS_HTML +
         '<div class="mlog"></div>' +
+        '<div class="press run"><button data-go="1">\u25b6 Play</button>' +
+        '<button data-go="0">\u25a0 Stop</button></div>' +
         '<div class="press">' + ["A", "B", "AB", "shake"]
           .map(k => '<button data-k="' + k + '">' + (k === "AB" ? "A+B" : k === "shake" ? "Shake" : k) + "</button>").join("") +
         "</div>";
       grid.appendChild(card);
-      card.querySelectorAll(".press button").forEach(btn => btn.addEventListener("click", () => {
+      card.querySelectorAll(".press.run button").forEach(btn => btn.addEventListener("click", () => {
+        if (btn.dataset.go === "1") runDevice(m); else stopDevice(m);
+      }));
+      card.querySelectorAll(".press:not(.run) button").forEach(btn => btn.addEventListener("click", () => {
         const cb = m.handlers[btn.dataset.k];
         if (!cb) { say("nothing is listening for " + btn.dataset.k, "say", m); return; }
         say("pressed " + btn.dataset.k, "say", m);
