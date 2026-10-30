@@ -154,11 +154,21 @@ export function createRoom(options) {
     return { t: clock.now, scene: sceneName, seed: seed, ...env.snapshot() };
   }
 
+  /* The room's light, as a square of samples for the renderer. Twelve
+     thousand of them, against a 16 ms frame, so it is worked out again only
+     when something that makes or blocks light has actually moved. */
+  let cached = null;
+  function lightMap(n) {
+    const mark = env.generation() + ":" + n + ":" + sceneName;
+    if (!cached || cached.mark !== mark) cached = { mark: mark, map: env.lightMap(n), n: n };
+    return cached;
+  }
+
   const stop = bus.listen(ROOM, handle);
   open(opts.scene || DEFAULT_SCENE);
 
   return {
-    bus, handle, tick, snapshot, open, add,
+    bus, handle, tick, snapshot, lightMap, open, add,
     env: () => env,
     bodies: () => bodies,
     problems: () => problems.slice(),

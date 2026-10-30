@@ -21,20 +21,37 @@ export const MATERIALS = {
 };
 
 /* How big a thing is, how tall it stands and how much light bounces off it.
-   A whiteboard throws light around a room; a black backpack swallows it. */
+   A whiteboard throws light around a room; a black backpack swallows it. The
+   fill is what it looks like from above, because the room is drawn from
+   above - these are the gym's own colours and they should stay that way. */
 export const CATALOGUE = {
-  table:      { w: 470, h: 330, z: 240, reflect: 0.35 },
-  chair:      { w: 190, h: 190, z: 450, reflect: 0.30 },
-  sofa:       { w: 300, h: 640, z: 300, reflect: 0.20 },
-  box:        { w: 240, h: 240, z: 240, reflect: 0.40 },
-  whiteboard: { w: 900, h: 60,  z: 900, reflect: 0.80 },
-  backpack:   { w: 220, h: 160, z: 300, reflect: 0.05 },
-  bin:        { w: 200, h: 200, z: 320, reflect: 0.25 },
-  cone:       { w: 180, h: 180, z: 300, reflect: 0.55 },
-  hedge:      { w: 900, h: 200, z: 700, reflect: 0.10 },
-  tree:       { w: 300, h: 300, z: 2200, reflect: 0.12 },
-  bench:      { w: 700, h: 200, z: 420, reflect: 0.22 },
-  wall:       { w: 800, h: 100, z: 900, reflect: 0.50 }
+  "table":      { w: 470, h: 330, z: 240, fill: "#8a5a32", reflect: 0.35 },
+  "chair":      { w: 190, h: 190, z: 450, fill: "#7a5230", reflect: 0.30 },
+  "sofa":       { w: 300, h: 640, z: 300, fill: "#3f5a7a", reflect: 0.20 },
+  "wall":       { w: 760, h: 90,  z: 900, fill: "#8d96a6", reflect: 0.55 },
+  "whiteboard": { w: 620, h: 70,  z: 900, fill: "#e8edf5", reflect: 0.85 },
+  "mirror":     { w: 320, h: 45,  z: 700, fill: "#cfe3f0", reflect: 0.95 },
+  "projector":  { w: 200, h: 150, z: 130, fill: "#d3d8e2", reflect: 0.60 },
+  "screen":     { w: 620, h: 60,  z: 950, fill: "#f2f4f8", reflect: 0.88 },
+  "bookcase":   { w: 230, h: 620, z: 420, fill: "#6b4b2e", reflect: 0.25 },
+  "cupboard":   { w: 300, h: 500, z: 800, fill: "#5d4733", reflect: 0.28 },
+  "toy box":    { w: 420, h: 200, z: 190, fill: "#4e6b45", reflect: 0.30 },
+  "plant":      { w: 260, h: 250, z: 520, fill: "#2f6b43", reflect: 0.18, round: true },
+  "bin":        { w: 180, h: 180, z: 350, fill: "#3b4250", reflect: 0.15, round: true },
+  "backpack":   { w: 180, h: 140, z: 230, fill: "#2d3b55", reflect: 0.12 },
+  "pencil box": { w: 120, h: 65,  z: 50,  fill: "#c0483a", reflect: 0.45 },
+  "notebook":   { w: 140, h: 100, z: 20,  fill: "#f0f2f6", reflect: 0.72 },
+  "paper":      { w: 150, h: 110, z: 8,   fill: "#fbfcfe", reflect: 0.80 },
+  "pen":        { w: 80,  h: 20,  z: 15,  fill: "#2b2f38", reflect: 0.25 },
+  "book":       { w: 150, h: 110, z: 35,  fill: "#8a3b52", reflect: 0.35 },
+  "box":        { w: 300, h: 150, z: 260, fill: "#50596b", reflect: 0.40 },
+  "speaker":    { w: 170, h: 130, z: 280, fill: "#23262e", reflect: 0.14, speaker: true },
+  /* outdoors */
+  "hedge":      { w: 900, h: 200, z: 700, fill: "#2f5a35", reflect: 0.10 },
+  "tree":       { w: 300, h: 300, z: 2200, fill: "#2b5e38", reflect: 0.12, round: true },
+  "bench":      { w: 700, h: 200, z: 420, fill: "#6b4b2e", reflect: 0.22 },
+  "cone":       { w: 180, h: 180, z: 300, fill: "#d96a2b", reflect: 0.55, round: true },
+  "goal":       { w: 900, h: 120, z: 800, fill: "#c9ced8", reflect: 0.60 }
 };
 
 const DEFAULTS = {
@@ -71,7 +88,7 @@ export function loadScene(data) {
     radioReach: d.radioReach == null ? DEFAULTS.radioReach : d.radioReach,
     furniture: (d.furniture || []).map(furnish),
     lamps: (d.lamps || []).map(lamp),
-    speakers: (d.speakers || []).map(speaker),
+    speakers: [],                     // filled in below, from the furniture
     lines: (d.lines || []).map(line),
     start: (d.start || DEFAULTS.start).map(start)
   };
@@ -86,6 +103,13 @@ export function loadScene(data) {
   }
   const g = MATERIALS[s.ground.material];
   s.ground = { reflect: g.reflect, ...s.ground, ...g, material: s.ground.material };
+
+  /* A speaker is a box you can bump into AND a noise. It goes in the
+     furniture, which is where every solid thing lives, and `speakers` holds
+     the very same objects so the sound field does not have to go looking.
+     One object, two lists, so the two can never disagree. */
+  for (const sp of (d.speakers || []).map(speaker)) s.furniture.push(sp);
+  s.speakers = s.furniture.filter(f => f.speaker);
   return s;
 }
 
@@ -107,7 +131,8 @@ function lamp(L) {
 }
 
 function speaker(S) {
-  const o = { loud: 430, reach: 500, playing: false, ...S };
+  const o = { name: "speaker", ...CATALOGUE.speaker, loud: 430, reach: 500,
+              playing: false, rot: 0, ...S, speaker: true };
   if (o.x == null || o.y == null) fail("a speaker has nowhere to stand");
   return o;
 }

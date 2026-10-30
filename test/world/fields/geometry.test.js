@@ -19,10 +19,9 @@ describe("the geometry field", () => {
   });
 
   it("finds furniture before the wall behind it", () => {
+    /* a box is 300 x 150, so standing at (900, 500) its near edge is y = 650 */
     const { g } = build({ size: 2000, furniture: [{ name: "box", x: 900, y: 500 }] });
-    const d = g.raycast({ x: 1000, y: 1500 }, UP);
-    expect(d).toBeGreaterThan(700);
-    expect(d).toBeLessThan(800);
+    expect(g.raycast({ x: 1000, y: 1500 }, UP)).toBeCloseTo(850, -1);
   });
 
   it("sees nothing out there when the scene has no walls", () => {

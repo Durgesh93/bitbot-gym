@@ -19,7 +19,7 @@ const RULES = {
   app:      ["core", "hardware", "world", "api"],
   ui:       ["core", "app"],
   room:     ["core", "app"],
-  tools:    ["core", "hardware", "world", "api", "app"]   // dev tools: rulers, not the gym
+  tools:    ["core", "hardware", "world", "api", "app", "room"]   // dev tools: rulers, not the gym
 };
 
 const SRC = resolve(__dirname, "../../src");

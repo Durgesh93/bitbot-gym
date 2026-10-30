@@ -40,8 +40,25 @@ export function createEnvironment(data) {
      so a scene with no light sensor in it never pays for shadows. Nothing can
      change between here and the reads, so the answers are still the same for
      every sensor in the tick - which is what keeps a run repeatable. */
+  let generation = 0;
   function moved() {
     light.stale();
+    generation++;
+  }
+
+  /* The light the EYE sees, as a square of samples, for drawing the room.
+     This is a different question from what a sensor reads: flat on the
+     floor, looking straight up, and it wants the whole room at once. The
+     renderer must not reach into the fields itself, so it asks here. */
+  function lightMap(n) {
+    const out = new Float32Array(n * n);
+    const step = scene.size / n;
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        out[j * n + i] = light.at({ x: (i + 0.5) * step, y: (j + 0.5) * step }, { z: 0 });
+      }
+    }
+    return out;
   }
 
   return {
@@ -57,6 +74,8 @@ export function createEnvironment(data) {
     radioBetween: (a, b) => radio.between(a, b),
 
     setBodies(list) { geometry.setBodies(list); moved(); },
+    lightMap,
+    generation: () => generation,
     setEmitters(list) { sound.setEmitters(list); },
     moved,
     contacts: (body) => geometry.contacts(body),
