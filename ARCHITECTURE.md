@@ -12,17 +12,24 @@ Everything in the gym is arranged around that one honest fact.
     blocks the child wrote
             |
             v
+    app/program.js                        turns the source into something
+            |                             that can be paused mid-sentence
+            v
     api/microbit.js  api/bitbot.js        the blocks, and nothing else
             |  "go forward at 30"
             v
-    core/bus.js                           the orchestrator: every message
-            |                             in the gym goes through here
-            +--> hardware/microbit.js     a board: screen, buttons, compass
-            +--> hardware/bitbot.js       a body: motors, encoders, sensors
-                        |
-                        v
-                world/physics.js          one 5 ms step of the world
-                        |
+    app/machine.js                        one robot: a board, a chassis,
+            |                             and a program waiting on the clock
+            v
+    hardware/microbit.js                  a board: screen, buttons, compass
+    hardware/bitbot.js                    a body: motors, encoders, probes
+            |  forces, emitters, probes
+            v
+    world/environment.js                  the laws, in six fields
+            |  one snapshot
+            v
+    app/room.js                           the only thing that writes
+            |
             +-----------+-----------+
             v                       v
     ui/ (React)              room/ (p5)   cards and panels, and the room
@@ -116,7 +123,7 @@ sync. `test/app/room.test.js` holds that promise from both ends.
 | `world/`    | `core/`, `hardware/`  | ui, room             |
 | `api/`      | `core/`, `hardware/`  | world, ui, room      |
 | `app/`      | all of the above      | -                    |
-| `ui/`       | `core/`, `app/`       | hardware, world      |
+| `ui/`       | `core/`, `app/`, `room/`, `world/scenes/` | hardware, the fields |
 | `room/`     | `core/`, `app/`       | hardware, world      |
 
 A test enforces this, so the layering cannot quietly rot. It is also the fix
@@ -222,14 +229,74 @@ millimetre.
 
 ## Devices
 
-A device is a small object with `step(dt)`, `read(what)` and `handle(message)`.
-`hardware/microbit.js` and `hardware/bitbot.js` are two of them. A different
-robot, or a new sensor, is a new file implementing the same three methods - no
-change anywhere else.
+A device does not step itself and does not own a clock. It is a bag of state
+with four things the rest of the gym uses:
+
+    PROBES          where it wants the world sampled, in its own body's terms
+    read(senses)    physical quantities in, the numbers a block returns out
+    state()         what the snapshot should carry about it
+    (accessors)     wheels(), press(), beep(), encoder() - the wire, in effect
+
+`hardware/microbit.js` and `hardware/bitbot.js` are the two we ship. A
+different robot, or a new sensor, is a new file of the same shape and no
+change anywhere else. Notice what is *not* there: nothing that knows what
+another device is, and nothing that knows what time it is.
+
+## Running a child's program
+
+A child's program is written as though it owns the world - `go forward, pause
+one second, turn` - and the gym runs ten of them against a clock that only
+moves when the room says so. Three files meet that problem.
+
+`app/program.js` rewrites the source before running it. MakeCode's JavaScript
+is synchronous, and the gym cannot block, so every function becomes `async`
+and every blocking call gains an `await`. **The order matters and used to be
+wrong**: the single file inserted the awaits first, so `function wiggle()`
+came out as `function await wiggle()` and any program with a function of its
+own died on a syntax error. Async pass first, await pass second, with a guard
+so `function (` is never a call site.
+
+`app/machine.js` is one robot that can run one program. `wait(ms)` hands back
+a promise and writes down when it should be kept; the room ticks, the clock
+moves, and `release()` keeps the promises that have come due. So a program
+only ever runs in the gaps between ticks and can never see the world half way
+through moving. Stop bumps a token, and everything still waiting on the old
+token is rejected with `Stopped`, which unwinds the program wherever it had
+got to. That is there because of a real bug: a stopped robot that carried on
+driving, because its forever loop was still alive in the background.
+
+`api/` is the blocks and nothing else - 104 of them for the Bit:Bot, the rest
+for the board - wrapped in a forgiving proxy so an unknown block says so in
+the log instead of killing the program mid-lesson. The proxy is also why
+`test/api/blocks.test.js` exists: it would just as happily hide a block that
+went missing.
+
+## The single writer
+
+`app/room.js` is the only thing in the gym that writes. Everything else asks
+it to. A click is a `post`; it lands on the next drain, which is between
+ticks, exactly where a child's hand lands. What comes back out is one
+snapshot a tick - plain data, so it survives `JSON.parse(JSON.stringify())`
+and would survive a Worker boundary if the gym ever needs one.
+
+That gives the whole app one direction:
+
+    a hand      ->  post     ->  room  ->  hardware  ->  world
+    the screen  <-  snapshot <-  room  <-  hardware  <-  world
+
+Each direction has one channel and one shape. The UI holds no state of the
+gym at all: `ui/useRoom.js` keeps the room in a ref *outside* React, runs one
+rAF loop, and drops each snapshot into a single piece of state. So a
+component can do exactly two things - read the snapshot it was handed, and
+post a message - and there is nothing for two components to disagree about.
+
+A card is the clearest case. It has no state: the screen, the sensor numbers,
+whether the program is running, all of it comes out of one snapshot entry. A
+bug in the card can make the gym *look* wrong. It cannot make it *be* wrong.
 
 ## Tests
 
-Four kinds, and `npm test` runs the lot. 161 of them today, in about two
+Six kinds, and `npm test` runs the lot. 275 of them today, in about two
 seconds, with no browser anywhere.
 
 - **unit** - each field and each piece of geometry on its own.
@@ -242,8 +309,10 @@ seconds, with no browser anywhere.
 - **parity** - the light field is pinned to the numbers the published gym
   gives, to the last digit. A physics change now has to be a decision.
 - **layering** - the import rule in the table above, enforced per file.
-- **blocks** - every block in the API called at least once. *Still to write;*
-  it alone would have caught all three shadowing bugs.
+- **blocks** - every block in the API called at least once, and the list of
+  names checked against the API the gym actually builds. The forgiving proxy
+  means a block that goes missing answers `undefined` instead of throwing, so
+  without this gate it would vanish silently and only a child would find out.
 - **regression** - every finished `.hex` in the course folder loaded and run
   headless. *Still to write.* Eighteen of them. This is the gate the new gym
   has to pass before it replaces the published one.
