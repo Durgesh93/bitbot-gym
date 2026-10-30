@@ -49,7 +49,7 @@ button.on { background: var(--accent); border-color: var(--accent); color: #0624
 button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 label.inline { color: var(--muted); font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
 
-.layout { display: grid; gap: 12px; grid-template-columns: minmax(430px, 1fr) minmax(0, 560px) 262px; align-items: start; }
+.layout { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 262px; align-items: start; }
 @media (max-width: 1340px) { .layout { grid-template-columns: minmax(0,1fr) 262px; } .code { grid-column: 1 / -1; } }
 /* for explaining at the board: give the blocks the width and keep just the room */
 body.wide .layout { grid-template-columns: minmax(0, 1fr) 340px; }
@@ -63,8 +63,8 @@ body.wide iframe#editor, body.wide .editor-off { height: 700px; }
 /* code side */
 .tabs { display: flex; gap: 6px; margin-bottom: 9px; }
 .tabs button { padding: 6px 13px; font-size: 12.5px; }
-iframe#editor { width: 100%; height: 620px; border: 1px solid var(--line); border-radius: 9px; background: #0d1017; display: block; }
-.editor-off { height: 620px; display: grid; place-content: center; text-align: center; gap: 10px;
+iframe#editor { width: 100%; height: 560px; border: 1px solid var(--line); border-radius: 9px; background: #0d1017; display: block; }
+.editor-off { height: 560px; display: grid; place-content: center; text-align: center; gap: 10px;
   border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); padding: 20px; }
 .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .presets button { padding: 5px 10px; font-size: 12px; }
@@ -84,6 +84,21 @@ canvas#room { width: 100%; height: auto; aspect-ratio: 1/1; display: block; bord
 
 /* instruments */
 .instr { display: grid; gap: 10px; }
+/* the two things you reach for while the robot runs, right above the blocks */
+.toprow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; align-items: start; }
+.toprow .panel { padding: 10px 12px; }
+.toprow #log { height: 128px; }
+.toprow .sliders { gap: 2px; font-size: 11.5px; }
+.toprow .sliders input[type=range] { height: 14px; margin: 0; }
+.toprow .sliders { grid-template-columns: 150px 1fr; align-items: center; }
+.toprow .sliders label { gap: 4px; grid-template-columns: 1fr 42px; }
+.toprow .sliders input[type=range] { grid-column: auto; }
+.toprow .hint { display: none; }
+.toprow .tabs { margin-top: 6px !important; }
+.toprow .tabs button { padding: 4px 9px; font-size: 11.5px; }
+.toprow #invert { margin-top: 6px !important; font-size: 11.5px; padding: 5px 10px; }
+.toprow .inline { font-size: 11.5px; }
+@media (max-width: 900px) { .toprow { grid-template-columns: 1fr; } }
 .screen { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; background: #08080c; border-radius: 9px; padding: 9px; width: 130px; margin: 0 auto; }
 .screen span { aspect-ratio: 1/1; border-radius: 2px; background: var(--led-off); }
 .screen span.on { background: var(--led-on); box-shadow: 0 0 6px var(--led-on); }
@@ -116,7 +131,6 @@ footer { color: var(--muted); font-size: 12px; margin-top: 14px; }
   <span class="spacer"></span>
   <button id="run" class="go">Run</button>
   <button id="stopBtn" class="stop">Stop</button>
-  <button id="step">Step 0.1s</button>
   <label class="inline">Speed
     <select id="speed">
       <option value="1" selected>1x</option>
@@ -138,6 +152,38 @@ footer { color: var(--muted); font-size: 12px; margin-top: 14px; }
       <div class="presets">
         <button id="pullCode" class="go">Take the code &amp; run</button>
       </div>
+    <div class="toprow">
+      <div class="panel">
+        <h2>Robot settings</h2>
+        <div class="sliders">
+          <label title="how fast the wheels turn at 100 per cent, in mm per second">top speed <b id="v-top">450</b></label>
+          <input type="range" id="s-top" min="150" max="900" step="10" value="450">
+          <label title="below this power the motors only buzz and the robot does not move">deadband <b id="v-dead">15</b></label>
+          <input type="range" id="s-dead" min="0" max="40" step="1" value="15">
+          <label title="how bright the torch is">torch <b id="v-torch">1200</b></label>
+          <input type="range" id="s-torch" min="200" max="2000" step="50" value="1200">
+          <label title="how hard the tyres hold before they slip">grip <b id="v-grip">0.70</b></label>
+          <input type="range" id="s-grip" min="0.2" max="1.2" step="0.05" value="0.7">
+          <label title="the two motors are never twins, which is why a robot curves when told to go straight">motor mismatch <b id="v-mis">3</b></label>
+          <input type="range" id="s-mis" min="-10" max="10" step="1" value="3">
+          <label title="a tired battery is a slower robot">battery <b id="v-batt">100</b></label>
+          <input type="range" id="s-batt" min="10" max="100" step="1" value="100">
+        </div>
+        <div class="tabs" style="margin-top:9px">
+          <button data-floor="lino" class="on">Lino</button>
+          <button data-floor="carpet">Carpet</button>
+          <button data-floor="polished">Polished</button>
+        </div>
+        <label class="inline" style="margin-top:8px"><input type="checkbox" id="air" checked> count air resistance</label>
+        <button id="invert" style="width:100%;margin-top:9px">Light sensors: higher = brighter</button>
+        <p class="hint">Measure your own Bit:Bot once and set these, then the gym stops lying to you.
+        If your robot reads the other way round, press the button above.</p>
+      </div>
+      <div class="panel">
+        <h2>What happened</h2>
+        <div id="log"></div>
+      </div>
+    </div>
       <div id="editorSlot">
         <div class="editor-off">
           <b style="color:var(--fg);font-size:15px">Starting MakeCode&hellip;</b>
@@ -206,37 +252,7 @@ footer { color: var(--muted); font-size: 12px; margin-top: 14px; }
       <div class="bar"><i id="b-lr"></i></div>
     </div>
 
-    <div class="panel">
-      <h2>Robot settings</h2>
-      <div class="sliders">
-        <label>top speed at 100% <b id="v-top">450</b></label>
-        <input type="range" id="s-top" min="150" max="900" step="10" value="450">
-        <label>deadband (won't move below) <b id="v-dead">15</b></label>
-        <input type="range" id="s-dead" min="0" max="40" step="1" value="15">
-        <label>torch strength <b id="v-torch">1200</b></label>
-        <input type="range" id="s-torch" min="200" max="2000" step="50" value="1200">
-        <label>grip, how hard the tyres hold <b id="v-grip">0.70</b></label>
-        <input type="range" id="s-grip" min="0.2" max="1.2" step="0.05" value="0.7">
-        <label>right motor runs faster by <b id="v-mis">3</b>%</label>
-        <input type="range" id="s-mis" min="-10" max="10" step="1" value="3">
-        <label>battery <b id="v-batt">100</b>%</label>
-        <input type="range" id="s-batt" min="10" max="100" step="1" value="100">
-      </div>
-      <div class="tabs" style="margin-top:9px">
-        <button data-floor="lino" class="on">Lino</button>
-        <button data-floor="carpet">Carpet</button>
-        <button data-floor="polished">Polished</button>
-      </div>
-      <label class="inline" style="margin-top:8px"><input type="checkbox" id="air" checked> count air resistance</label>
-      <button id="invert" style="width:100%;margin-top:9px">Light sensors: higher = brighter</button>
-      <p class="hint">Measure your own Bit:Bot once and set these, then the gym stops lying to you.
-      If your robot reads the other way round, press the button above.</p>
-    </div>
 
-    <div class="panel">
-      <h2>What happened</h2>
-      <div id="log"></div>
-    </div>
   </aside>
 </div>
 
@@ -1221,11 +1237,6 @@ async function loop() {
   }
   draw(); instruments();
 }
-async function stepOnce() {
-  const n = Math.round(100 / DT);
-  for (let i = 0; i < n; i++) { physics(DT); simTime += DT; flushTimers(); await Promise.resolve(); }
-  draw(); instruments();
-}
 
 /* ========================================================================
    7. Drawing
@@ -1539,7 +1550,6 @@ el("wide").addEventListener("click", e => {
 });
 el("run").addEventListener("click", runProgram);
 el("stopBtn").addEventListener("click", () => stopProgram(false));
-el("step").addEventListener("click", stepOnce);
 
 /* ========================================================================
    10. Programs to start from - the real ones, copied out of MakeCode
