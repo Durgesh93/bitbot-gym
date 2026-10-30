@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { loadScene } from "../../../src/world/scene.js";
-import { createGeometry } from "../../../src/world/fields/geometry.js";
+import { createMotion } from "../../../src/world/motion.js";
 import { createLight, normalFrom, UP } from "../../../src/world/fields/light.js";
 
 const EYE_TILT = 0.80, EYE_Z = 42;
@@ -8,8 +8,8 @@ const eye = facing => ({ z: EYE_Z, normal: normalFrom(facing, EYE_TILT), bounce:
 
 function build(data) {
   const scene = loadScene(data);
-  const geometry = createGeometry(scene);
-  return { scene, geometry, light: createLight(scene, geometry) };
+  const motion = createMotion(scene);
+  return { scene, motion, light: createLight(scene, motion) };
 }
 
 describe("the light field", () => {
@@ -76,13 +76,13 @@ describe("the light field", () => {
   });
 
   it("lets one robot cast a shadow on another, which is the whole point", () => {
-    const { geometry, light } = build({ lamps: [{ x: 1000, y: 300, kind: "floor" }] });
+    const { motion, light } = build({ lamps: [{ x: 1000, y: 300, kind: "floor" }] });
     /* A 95 mm robot lit by a lamp 300 mm up throws a shadow only about
        240 mm long, so the spot behind it has to be close. */
     const spot = { x: 1000, y: 780 };
     const clear = light.at(spot, eye(-Math.PI / 2));
 
-    geometry.setBodies([{ owner: "A", x: 1000, y: 600, r: 62, z: 95 }]);
+    motion.add({ id: "A", x: 1000, y: 600, r: 62, z: 95 });
     light.stale();
     const blocked = light.at(spot, eye(-Math.PI / 2));
 
@@ -90,8 +90,8 @@ describe("the light field", () => {
   });
 
   it("never puts a robot in its own shadow", () => {
-    const { geometry, light } = build({ lamps: [{ x: 1000, y: 300, kind: "floor" }] });
-    geometry.setBodies([{ owner: "A", x: 1000, y: 700, r: 62, z: 95 }]);
+    const { motion, light } = build({ lamps: [{ x: 1000, y: 300, kind: "floor" }] });
+    motion.add({ id: "A", x: 1000, y: 700, r: 62, z: 95 });
     light.stale();
     const own = light.at({ x: 1000, y: 700 }, { ...eye(-Math.PI / 2), self: "A" });
     const other = light.at({ x: 1000, y: 700 }, { ...eye(-Math.PI / 2), self: "B" });
@@ -154,8 +154,8 @@ describe("the light field", () => {
     it("still ends a robot's shadow under a ceiling light", () => {
       /* Nothing in a classroom is taller than a 2.5 m panel, so every shadow
          indoors is the ending kind, which is what it was before. */
-      const { geometry, light } = build({ lamps: [{ x: 1000, y: 1000, kind: "ceiling" }] });
-      geometry.setBodies([{ id: 1, x: 1000, y: 1400, r: 62, z: 95 }]);
+      const { motion, light } = build({ lamps: [{ x: 1000, y: 1000, kind: "ceiling" }] });
+      motion.add({ id: 1, x: 1000, y: 1400, r: 62, z: 95 });
       light.stale();
       const close = light.at({ x: 1000, y: 1480 }, eye(Math.PI / 2));
       const beyond = light.at({ x: 1000, y: 1800 }, eye(Math.PI / 2));

@@ -191,17 +191,34 @@ dull overcast 3 units instead. Turn it up for the lesson, not by default.
 Adding a scene is its own file plus one line in `src/world/scenes/index.js`.
 Nothing else, anywhere.
 
-### What we deliberately did NOT use
+### Which engine does what
 
-No physics engine and no lighting library. matter.js is not deterministic
-enough to bet the regression on, and a differential drive with wheel slip,
-encoder counts and gearbox drag is not the rigid-body problem it solves;
-planck.js is, but it is 200 KB against a file that has to open offline on a
-Chromebook. The lighting libraries produce pixels, and we need values a sensor
-can read at a point with a normal. The physics here is about 80 lines of real
-Newtonian maths, and the light field matches the published gym to seven
-decimal places - there is a test that says so. Replacing tested lines with a
-dependency and an adapter is more to debug, not less.
+**matter.js** owns where bodies are and what happens when they collide
+(`world/motion.js`). It does not know what a differential drive is, so that
+stays ours: two wheel speeds give a forward speed and a turn rate, handed to
+Matter as a velocity each step. The trap, which cost an afternoon: 
+`Body.setVelocity` takes units per Matter's own base delta of 1000/60 ms, not
+per the step you are about to take - so mm/s goes in divided by 60.
+
+**@flatten-js/core** does the exact ray arithmetic. Matter's `Query.ray` says
+which bodies a line passes but not how far along, and the sonar is entirely
+about how far along, so Matter narrows the field and flatten measures. Its
+`Ray` takes a normal rather than a direction, so a `Segment` is used, which is
+also the honest shape for a sensor with a 2 m reach.
+
+**visibility-polygon** gives the light field the lit region of a source, which
+is what makes a tall thing's shadow run on until it meets a wall. Things
+shorter than the lamp get a shadow that ENDS, and that is similar triangles
+rather than a visibility problem, so it stays ours.
+
+**No lighting library.** They produce pixels and a sensor needs a value at a
+point with a normal. The renderer draws from the profile the field samples for
+it, so the picture and the readings come from one place.
+
+The cost of the engines is that a run is no longer bit-identical. That was a
+deliberate trade: the regression asserts that eighteen real hex files run
+without error and end up somewhere sensible, not that they land on the same
+millimetre.
 
 ## Devices
 

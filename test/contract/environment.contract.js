@@ -39,8 +39,10 @@ export function describeEnvironmentContract(label, data) {
         expect(s.y).toBeGreaterThan(0);
         expect(s.x).toBeLessThan(env.size);
         expect(s.y).toBeLessThan(env.size);
-        env.setBodies([{ id: 1, ...s, ...BODY }]);
-        expect(env.contacts({ id: 1, ...s, ...BODY })).toEqual([]);
+        env.addBody({ id: 1, ...s, ...BODY });
+        env.step(16);
+        expect(env.contacts(1)).toEqual([]);
+        env.removeBody(1);
       }
     });
 
@@ -97,7 +99,7 @@ export function describeEnvironmentContract(label, data) {
       expect(spot, "no clear 500 mm of floor anywhere in this scene").toBeTruthy();
 
       const ahead = { x: spot.x + Math.cos(spot.a) * 300, y: spot.y + Math.sin(spot.a) * 300 };
-      env.setBodies([{ id: 7, ...ahead, ...BODY }]);
+      env.addBody({ id: 7, ...ahead, ...BODY });
       const blocked = env.raycast(spot, spot.a);
       const ownRay = env.raycast(spot, spot.a, { self: 7 });
 
@@ -108,21 +110,32 @@ export function describeEnvironmentContract(label, data) {
     it("pushes two bodies that are on top of each other apart, and never a body off itself", () => {
       const env = make();
       const spot = clearSpot(env, 500);
-      const a = { id: 1, owner: 1, x: spot.x, y: spot.y, ...BODY };
-      const b = { id: 2, owner: 2, x: spot.x + 20, y: spot.y, ...BODY };
-      env.setBodies([a, b]);
-      const hit = env.contacts(a).filter(c => c.what === "robot");
+      env.addBody({ id: 1, x: spot.x, y: spot.y, ...BODY });
+      env.addBody({ id: 2, x: spot.x + 20, y: spot.y, ...BODY });
+      env.step(16);
+      const hit = env.contacts(1).filter(c => c.what === "robot");
       expect(hit).toHaveLength(1);
+      expect(hit[0].other).toBe(2);
       expect(hit[0].overlap).toBeGreaterThan(0);
-      expect(env.contacts(a).some(c => c.other === a)).toBe(false);
+      expect(env.contacts(1).some(c => c.other === 1)).toBe(false);
+
+      /* and they do not stay on top of each other */
+      const gap = () => Math.hypot(env.bodyOf(2).x - env.bodyOf(1).x,
+                                   env.bodyOf(2).y - env.bodyOf(1).y);
+      const before = gap();
+      for (let i = 0; i < 30; i++) env.step(16);
+      expect(gap()).toBeGreaterThan(before);
     });
 
     it("keeps a body inside a walled room and lets it leave an open one", () => {
       const env = make();
-      const out = { id: 1, owner: 1, x: -50, y: env.size / 2, ...BODY };
-      const walls = env.contacts(out).filter(c => c.what === "wall");
-      if (env.scene.walls) expect(walls.length).toBeGreaterThan(0);
-      else expect(walls).toHaveLength(0);
+      /* drive hard at the left wall and see where it ends up */
+      env.addBody({ id: 1, x: 300, y: env.size / 2, ...BODY });
+      env.drive(1, -400, -400);
+      for (let i = 0; i < 200; i++) env.step(16);
+      const x = env.bodyOf(1).x;
+      if (env.scene.walls) expect(x).toBeGreaterThan(0);
+      else expect(x).toBeLessThan(0);
     });
 
     it("hears a board's own buzzer louder than its neighbour's", () => {
@@ -152,11 +165,14 @@ export function describeEnvironmentContract(label, data) {
          compared in a test, and some component is holding a reference it
          should not have. */
       const env = make();
-      env.setBodies([{ id: 1, owner: { secret: "a whole device" }, x: 500, y: 500, ...BODY }]);
+      env.addBody({ id: 1, x: 500, y: 500, ...BODY });
       const snap = env.snapshot();
       const copy = JSON.parse(JSON.stringify(snap));
-      expect(copy.bodies[0]).toEqual({ id: 1, x: 500, y: 500, r: 62, z: 95, held: false });
-      expect(JSON.stringify(snap)).not.toContain("a whole device");
+      expect(copy.bodies[0]).toEqual({ id: 1, x: 500, y: 500, h: 0, r: 62, z: 95,
+                                      held: false, speed: 0 });
+      /* nothing in here may be a live matter.js body, or the snapshot cannot
+         cross into a Worker and a component could reach back and move it */
+      expect(JSON.stringify(snap)).not.toContain("\"parts\"");
     });
 
     it("works for a robot that only ever asks the six questions", () => {
@@ -194,9 +210,11 @@ function clearSpot(env, room) {
   for (let i = 1; i < n; i++) {
     for (let j = 1; j < n; j++) {
       const p = { x: env.size * i / n, y: env.size * j / n };
-      const body = { id: 999, owner: 999, ...p, ...BODY };
-      env.setBodies([]);
-      if (env.contacts(body).length) continue;
+      env.addBody({ id: 999, ...p, ...BODY });
+      env.step(16);
+      const touching = env.contacts(999).length;
+      env.removeBody(999);
+      if (touching) continue;
       for (let k = 0; k < 8; k++) {
         const a = k / 8 * Math.PI * 2;
         if (env.raycast(p, a) > room) return { x: p.x, y: p.y, a: a };

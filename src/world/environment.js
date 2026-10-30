@@ -19,7 +19,7 @@
    them out is what lets the same robot work in a classroom and on grass. */
 
 import { loadScene } from "./scene.js";
-import { createGeometry } from "./fields/geometry.js";
+import { createMotion } from "./motion.js";
 import { createLight } from "./fields/light.js";
 import { createSound } from "./fields/sound.js";
 import { createSurface } from "./fields/surface.js";
@@ -28,8 +28,8 @@ import { createRadio } from "./fields/radio.js";
 
 export function createEnvironment(data) {
   const scene = loadScene(data);
-  const geometry = createGeometry(scene);
-  const light = createLight(scene, geometry);
+  const motion = createMotion(scene);
+  const light = createLight(scene, motion);
   const sound = createSound(scene);
   const surface = createSurface(scene);
   const medium = createMedium(scene);
@@ -66,19 +66,31 @@ export function createEnvironment(data) {
     size: scene.size,
     scene: scene,
 
-    raycast: (from, angle, opts) => geometry.raycast(from, angle, opts),
+    raycast: (from, angle, opts) => motion.raycast(from, angle, opts),
     lightAt: (p, opts) => light.at(p, opts),
     soundAt: (p, opts) => sound.at(p, opts),
     surfaceAt: (p) => surface.at(p),
     mediumAt: () => medium.at(),
     radioBetween: (a, b) => radio.between(a, b),
 
-    setBodies(list) { geometry.setBodies(list); moved(); },
+    /* Bodies belong to matter.js now, so they are added and moved through
+       here rather than handed over as a list. Anything that changes where
+       something is says `moved()` on its way out, which is what marks the
+       light field stale exactly once. */
+    addBody(spec) { const b = motion.add(spec); moved(); return b; },
+    removeBody(id) { const ok = motion.remove(id); if (ok) moved(); return ok; },
+    holdBody(id, on) { return motion.hold(id, on); },
+    placeBody(id, x, y, h) { const ok = motion.place(id, x, y, h); if (ok) moved(); return ok; },
+    drive(id, vl, vr, axle) { return motion.drive(id, vl, vr, axle); },
+    step(dt) { const out = motion.step(dt); moved(); return out; },
+    bodies: () => motion.bodies(),
+    bodyOf: (id) => motion.bodyOf(id),
+
     lightMap,
     generation: () => generation,
     setEmitters(list) { sound.setEmitters(list); },
     moved,
-    contacts: (body) => geometry.contacts(body),
+    contacts: (body) => motion.contacts(body),
     starts: () => scene.start.map(s => ({ ...s })),
 
     /* Everything the view needs and nothing it does not, as one object per
@@ -112,13 +124,14 @@ export function createEnvironment(data) {
           visible: r.visible,
           profile: r.profile
         })),
-        bodies: geometry.bodies().map(b => ({
-          id: b.id, x: b.x, y: b.y, h: b.h, r: b.r, z: b.z, held: !!b.held
+        bodies: motion.bodies().map(b => ({
+          id: b.id, x: b.x, y: b.y, h: b.h, r: b.r, z: b.z,
+          held: !!b.held, speed: b.speed
         }))
       };
     },
 
     /* For tests and for the room editor, which needs to poke at one field. */
-    fields: { geometry, light, sound, surface, medium, radio }
+    fields: { motion, light, sound, surface, medium, radio }
   };
 }

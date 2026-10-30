@@ -233,7 +233,7 @@ export function createMotion(scene) {
             : (other.plugin && other.plugin.spec && other.plugin.spec.name) || "furniture",
         kind: kind || "furniture",
         other: kind === "robot" ? other.plugin.id : null,
-        depth: pair.collision ? pair.collision.depth : 0
+        overlap: pair.collision ? pair.collision.depth : 0
       });
     }
     return out;

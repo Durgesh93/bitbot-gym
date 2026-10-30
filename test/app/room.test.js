@@ -69,9 +69,25 @@ describe("the room", () => {
   describe("a human with a mouse", () => {
     it("moves a robot to where the hand let go", () => {
       const id = bus.send(ROOM, { cmd: "add" });
-      bus.post(ROOM, { cmd: "place", id, x: 1234, y: 567 });
+      bus.post(ROOM, { cmd: "place", id, x: 400, y: 1500 });   // clear floor
       room.tick();
-      expect(room.bodies()[0]).toMatchObject({ x: 1234, y: 567 });
+      const b = room.bodies()[0];
+      expect(b.x).toBeCloseTo(400, 3);
+      expect(b.y).toBeCloseTo(1500, 3);
+    });
+
+    it("shoves a robot back out if the hand drops it inside the table", () => {
+      /* matter.js owns this, and it is the right answer: a child who drops
+         a robot on the furniture gets it back beside the furniture rather
+         than half inside it. */
+      const id = bus.send(ROOM, { cmd: "add" });
+      const table = room.env().scene.furniture.find(f => f.name === "table");
+      bus.post(ROOM, { cmd: "place", id, x: table.x + table.w / 2, y: table.y + table.h / 2 });
+      for (let i = 0; i < 40; i++) room.tick();
+      const b = room.bodies()[0];
+      const inside = b.x > table.x && b.x < table.x + table.w &&
+                     b.y > table.y && b.y < table.y + table.h;
+      expect(inside).toBe(false);
     });
 
     it("collapses a whole drag into one move", () => {
@@ -87,18 +103,21 @@ describe("the room", () => {
 
     it("stops the wheels while it is being held, and lets go again", () => {
       const id = bus.send(ROOM, { cmd: "add" });
-      const b = room.bodies()[0];
-      b.vl = 300; b.vr = 300;
+      bus.send(ROOM, { cmd: "place", id, x: 400, y: 1500 });
+      bus.send(ROOM, { cmd: "drive", id, left: 300, right: 300 });
+
       bus.post(ROOM, { cmd: "hold", id });
       room.tick();
-      expect(b.held).toBe(true);
-      expect(b.vl).toBe(0);
+      const held = room.bodies()[0];
+      expect(held.held).toBe(true);
+      for (let i = 0; i < 10; i++) room.tick();
+      expect(room.bodies()[0].x).toBeCloseTo(held.x, 6);   // the hand has it
 
-      b.vl = 300;
       bus.post(ROOM, { cmd: "drop", id });
-      room.tick();
-      expect(b.held).toBe(false);
-      expect(b.vl).toBe(300);          // it is free to drive again
+      for (let i = 0; i < 10; i++) room.tick();
+      const free = room.bodies()[0];
+      expect(free.held).toBe(false);
+      expect(free.x).toBeGreaterThan(held.x + 5);          // driving again
     });
 
     it("lets a robot picked up and put down block another robot's sonar", () => {

@@ -37,7 +37,7 @@ export function normalFrom(facing, tilt) {
 }
 export const UP = { x: 0, y: 0, z: 1 };
 
-export function createLight(scene, geometry) {
+export function createLight(scene, bodies) {
   let sources = [];        // the point and directional ones
   let ambient = 0;
   let bounce = [];
@@ -116,7 +116,7 @@ export function createLight(scene, geometry) {
      that the hull-of-corners trick only approximated. One polygon per source
      covers every tall thing at once: outside it means in shadow. */
   function buildShadows() {
-    const casters = geometry.occluders();
+    const casters = bodies.occluders();
     shadows = sources.map(src => {
       const quads = [], walls = [];
       for (const c of casters) {

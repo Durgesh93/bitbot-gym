@@ -39,9 +39,12 @@ export function createRoom(options) {
 
   let sceneName = null;
   let env = null;
-  let bodies = [];
   let emitters = [];
   let nextId = 1;
+  /* What the room knows about a robot that matter.js has no use for: which
+     chassis it is and its own small squint. Where it IS lives in the engine,
+     and asking two places would be how they start disagreeing. */
+  const kit = new Map();
   const problems = [];      // posts that went nowhere or blew up, for the log
 
   function open(name) {
@@ -49,7 +52,7 @@ export function createRoom(options) {
     if (!data) throw new Error("there is no scene called " + name);
     sceneName = name;
     env = createEnvironment(data);
-    bodies = [];
+    kit.clear();
     emitters = [];
     nextId = 1;
     random.reseed(seed);
@@ -62,24 +65,24 @@ export function createRoom(options) {
   function add(spec) {
     const s = spec || {};
     const starts = env.starts();
-    const at = s.x != null ? s : (starts[bodies.length % starts.length] || starts[0]);
-    const body = {
-      id: s.id == null ? nextId++ : s.id,
-      x: at.x, y: at.y, h: at.heading == null ? 0 : at.heading,
-      r: s.r == null ? bitbot.CHASSIS.radius : s.r,
-      z: s.z == null ? 95 : s.z,
-      held: false,
+    const at = s.x != null ? s : (starts[kit.size % starts.length] || starts[0]);
+    const id = s.id == null ? nextId++ : s.id;
+    kit.set(id, {
       device: s.device || "bitbot",
       /* this robot's own small squint, fixed for its whole life, so its two
          eyes never read exactly the same and a light-chaser can choose */
       trim: s.trim == null ? random.int(-6, 6) : s.trim
-    };
-    bodies.push(body);
-    env.setBodies(bodies);
-    return body;
+    });
+    return env.addBody({
+      id: id,
+      x: at.x, y: at.y, h: at.heading == null ? 0 : at.heading,
+      r: s.r == null ? bitbot.CHASSIS.radius : s.r,
+      z: s.z == null ? 95 : s.z
+    });
   }
 
-  const find = id => bodies.find(b => b.id === id) || null;
+  const find = id => env.bodyOf(id);
+  const bodies = () => env.bodies();
 
   /* Every message the room takes. A sensor question is a `send` and comes
      back with a number; everything a human does is a `post` and lands on the
@@ -89,21 +92,15 @@ export function createRoom(options) {
     switch (m.cmd) {
       case "scene":   return open(m.name).name;
       case "add":     return add(m).id;
-      case "remove":  bodies = bodies.filter(b => b.id !== m.id); env.setBodies(bodies); return true;
+      case "remove":  kit.delete(m.id); return env.removeBody(m.id);
 
       /* A child picking a robot up with the mouse. Held means its wheels stop
          and its encoders do not jump, which is what the real thing does when
          you lift it off the floor. */
-      case "hold": { const b = find(m.id); if (b) b.held = true; return !!b; }
-      case "drop": { const b = find(m.id); if (b) b.held = false; return !!b; }
-      case "place": {
-        const b = find(m.id);
-        if (!b) return false;
-        b.x = m.x; b.y = m.y;
-        if (m.heading != null) b.h = m.heading;
-        env.setBodies(bodies);
-        return true;
-      }
+      case "hold":  return env.holdBody(m.id, true);
+      case "drop":  return env.holdBody(m.id, false);
+      case "place": return env.placeBody(m.id, m.x, m.y, m.heading);
+      case "drive": return env.drive(m.id, m.left, m.right, bitbot.CHASSIS.axle);
 
       case "lamp": {
         const L = env.scene.lamps[m.id];
@@ -150,10 +147,10 @@ export function createRoom(options) {
     for (const u of drained.undelivered) problems.push({ what: "nobody took it", ...u });
     while (problems.length > 50) problems.shift();
 
-    /* A held body does not move; the hand is holding it. */
-    for (const b of bodies) if (b.held) { b.vl = 0; b.vr = 0; }
+    /* 4. Everything moves, once, and the fields are marked stale once. A
+       held body is static in the engine, so the hand owns it completely. */
+    env.step(DT);
 
-    env.setBodies(bodies);
     for (const e of emitters) { const b = find(e.owner); if (b) { e.x = b.x; e.y = b.y; } }
     env.setEmitters(emitters);
 
@@ -161,11 +158,12 @@ export function createRoom(options) {
        probe on every robot is reading the same instant - which is what stops
        one eye seeing a lamp the other one missed. */
     senses.clear();
-    for (const b of bodies) {
-      const dev = DEVICES[b.device];
+    for (const b of env.bodies()) {
+      const own = kit.get(b.id);
+      const dev = own && DEVICES[own.device];
       if (!dev) continue;
       const raw = sample(env, b, dev.PROBES);
-      senses.set(b.id, { senses: raw, reads: dev.read(raw, b.trim) });
+      senses.set(b.id, { senses: raw, reads: dev.read(raw, own.trim) });
     }
 
     advance(DT);
@@ -206,7 +204,8 @@ export function createRoom(options) {
   return {
     bus, handle, tick, snapshot, lightMap, open, add,
     env: () => env,
-    bodies: () => bodies,
+    bodies: bodies,
+    kit: (id) => kit.get(id) || null,
     problems: () => problems.slice(),
     close: stop
   };
