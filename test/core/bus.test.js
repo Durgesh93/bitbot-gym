@@ -40,7 +40,7 @@ describe("the orchestrator", () => {
     bus.listen("bitbot", () => 7);
     bus.watch((r) => seen.push(r));
     bus.send("bitbot", { cmd: "sonar" });
-    expect(seen).toEqual([{ address: "bitbot", message: { cmd: "sonar" }, reply: 7 }]);
+    expect(seen).toEqual([{ address: "bitbot", message: { cmd: "sonar" }, kind: "send", reply: 7 }]);
   });
 
   it("keeps the traffic so a test can read back what a program did", () => {
