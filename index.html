@@ -167,6 +167,7 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
       <option value="8">8x</option>
     </select>
   </label>
+  <button id="allDev">All devices</button>
   <button id="openHex">Open a .hex</button>
   <input type="file" id="hexFile" accept=".hex" hidden>
   <button id="wide">Big blocks</button>
@@ -716,6 +717,7 @@ function killTimers(m) {
       and the board would really behave.
    ======================================================================== */
 const log = document.getElementById("log");
+let stageWin = null, stageDoc = null, stageHost = null, stageCards = new Map(), stageRoom = null;
 function say(msg, cls, m) {
   const d = document.createElement("div");
   if (cls) d.className = cls;
@@ -729,12 +731,24 @@ function say(msg, cls, m) {
     log.appendChild(d);
     while (log.children.length > 400) log.removeChild(log.firstChild);
     log.scrollTop = log.scrollHeight;
+    echoToStage(d);
     return;
   }
   d.textContent = (simTime / 1000).toFixed(1).padStart(5) + "  " + msg;
   log.appendChild(d);
   while (log.children.length > 300) log.removeChild(log.firstChild);
   log.scrollTop = log.scrollHeight;
+  echoToStage(d);
+}
+
+// the second window keeps its own copy of the log
+function echoToStage(d) {
+  if (!stageOpen()) return;
+  const l = stageDoc.getElementById("gym-stage-log");
+  if (!l) return;
+  l.appendChild(d.cloneNode(true));
+  while (l.children.length > 400) l.removeChild(l.firstChild);
+  l.scrollTop = l.scrollHeight;
 }
 
 const ICONS = {
@@ -1360,6 +1374,10 @@ async function runAll() {
   running = true;
   simTime = 0;
   log.innerHTML = "";
+  if (stageOpen()) {
+    const l = stageDoc.getElementById("gym-stage-log");
+    if (l) l.innerHTML = "";
+  }
   const live = world.mbits.filter(m => m.code.trim());
   if (!live.length) {
     say("nothing to run yet - build some blocks, or open a .hex", "err");
@@ -1399,7 +1417,7 @@ async function loop() {
       physics(DT); simTime += DT; flushTimers();
       await Promise.resolve();
     }
-    draw(); instruments();
+    draw(); instruments(); updateStage();
     await nextFrame();
   }
   draw(); instruments();
@@ -1819,7 +1837,7 @@ el("wide").addEventListener("click", e => {
   e.target.classList.toggle("on", on);
   e.target.textContent = on ? "Normal size" : "Big blocks";
 });
-el("run").addEventListener("click", runAll);
+el("run").addEventListener("click", () => { openStage(); runAll(); });
 el("stopBtn").addEventListener("click", () => stopAll(false));
 
 /* ========================================================================
@@ -1961,7 +1979,7 @@ function loadAll() {
   });
   return true;
 }
-el("pullCode").addEventListener("click", pullCode);
+el("pullCode").addEventListener("click", () => { openStage(); pullCode(); });
 
 function placeEveryone() {
   world.bots.forEach((b, i) => {
@@ -2115,6 +2133,164 @@ document.addEventListener("drop", e => {
   const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
   if (f && /\.hex$/i.test(f.name)) { e.preventDefault(); openHex(f); }
 });
+
+/* ========================================================================
+   13. The second window: every board and every robot at once, so you can
+       watch them all instead of clicking between them. Same origin, so we
+       just build its DOM from here and keep it fed each frame.
+   ======================================================================== */
+const STAGE_CSS = `
+  .gym-stage { font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif; font-size: 13px; color: #eef2f8; }
+  .gym-stage h1 { font-size: 14px; margin: 0 0 8px; letter-spacing: .08em; text-transform: uppercase; color: #9aa7bd; }
+  .gym-stage .wrap { display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: start; }
+  .gym-stage canvas { width: 100%; height: auto; border-radius: 10px; background: #0d1017; display: block; }
+  .gym-stage .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)); gap: 10px; }
+  .gym-stage .card { background: #1a1f2b; border: 1px solid #313a4e; border-radius: 12px; padding: 10px 12px; }
+  .gym-stage .top { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+  .gym-stage .top b { font-size: 15px; }
+  .gym-stage .dot { width: 10px; height: 10px; border-radius: 50%; display: block; }
+  .gym-stage .where { margin-left: auto; font-size: 11px; color: #9aa7bd; }
+  .gym-stage .body { display: flex; gap: 10px; }
+  .gym-stage .scr { display: grid; grid-template-columns: repeat(5, 9px); gap: 3px; background: #08080c;
+                    padding: 7px; border-radius: 7px; height: max-content; }
+  .gym-stage .scr span { width: 9px; height: 9px; border-radius: 2px; background: #3a2a2a; display: block; }
+  .gym-stage .scr span.on { background: #ff3b3b; box-shadow: 0 0 5px #ff3b3b; }
+  .gym-stage table { border-collapse: collapse; width: 100%; font-size: 11.5px; }
+  .gym-stage td { padding: 1px 0; }
+  .gym-stage td.k { color: #9aa7bd; }
+  .gym-stage td.v { text-align: right; font-family: ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .gym-stage .leds { display: flex; gap: 3px; margin-top: 7px; }
+  .gym-stage .leds i { width: 9px; height: 9px; border-radius: 50%; background: #2a2f3c; display: block; }
+  .gym-stage .card.idle { opacity: .55; }
+  .gym-stage #gym-stage-log { height: 300px; overflow: auto; background: #0d1017; border: 1px solid #313a4e;
+      border-radius: 10px; padding: 9px; font-family: ui-monospace, Menlo, monospace;
+      font-size: 11.5px; line-height: 1.55; color: #c6d2e4; }
+  .gym-stage #gym-stage-log div { white-space: pre-wrap; }
+  .gym-stage #gym-stage-log div.err { color: #ff9a9a; }
+  .gym-stage #gym-stage-log div.say { color: #f2b134; }
+`;
+
+const STAGE_HTML =
+  '<div class="wrap"><div><h1>The room</h1><canvas id="gym-stage-room" width="600" height="600"></canvas>' +
+  '<h1 style="margin-top:14px">What happened</h1><div id="gym-stage-log"></div></div>' +
+  '<div><h1>Every board</h1><div class="grid" id="gym-stage-grid"></div></div></div>';
+
+const stageOpen = () => !!stageDoc && !(stageWin && stageWin.closed);
+
+/* Its own window if the browser allows one, and a panel over the gym if not -
+   a blocked pop-up should not cost you the view. */
+function openStage() {
+  if (stageOpen()) { if (stageWin) stageWin.focus(); return; }
+  stageWin = null;
+  try { stageWin = window.open("", "bitbot-gym-stage", "width=1200,height=840"); } catch (e) { stageWin = null; }
+
+  if (stageWin) {
+    stageWin.document.open();
+    stageWin.document.write('<!doctype html><meta charset="utf-8"><title>Bit:Bot Gym - all devices</title>' +
+      "<style>body{margin:0;padding:12px;background:#11141c}" + STAGE_CSS + "</style>" +
+      '<body class="gym-stage">' + STAGE_HTML);
+    stageWin.document.close();
+    stageDoc = stageWin.document;
+    stageHost = stageDoc.body;
+    window.addEventListener("beforeunload", () => { if (stageWin && !stageWin.closed) stageWin.close(); });
+  } else {
+    say("the browser blocked a second window, so the view is here instead - allow pop-ups to get its own window", "say");
+    let host = document.getElementById("gym-stage-overlay");
+    if (!host) {
+      const st = document.createElement("style");
+      st.textContent = STAGE_CSS + `
+        #gym-stage-overlay { position: fixed; inset: 0; z-index: 40; background: #11141c;
+          padding: 14px; overflow: auto; }
+        #gym-stage-overlay .closer { position: absolute; top: 14px; right: 16px; }`;
+      document.head.appendChild(st);
+      host = document.createElement("div");
+      host.id = "gym-stage-overlay";
+      host.className = "gym-stage";
+      host.innerHTML = '<button class="closer" id="gym-stage-close">Close</button>' + STAGE_HTML;
+      document.body.appendChild(host);
+      host.querySelector("#gym-stage-close").addEventListener("click", closeStage);
+    }
+    host.hidden = false;
+    stageDoc = document;
+    stageHost = host;
+  }
+  stageCards = new Map();
+  stageRoom = stageDoc.getElementById("gym-stage-room");
+  const l = stageDoc.getElementById("gym-stage-log");
+  if (l) { l.innerHTML = ""; for (const d of log.children) l.appendChild(d.cloneNode(true)); l.scrollTop = l.scrollHeight; }
+  syncStage(); updateStage();
+}
+
+function closeStage() {
+  if (stageWin && !stageWin.closed) stageWin.close();
+  const host = document.getElementById("gym-stage-overlay");
+  if (host) host.hidden = true;
+  stageWin = null; stageDoc = null; stageHost = null; stageRoom = null; stageCards = new Map();
+}
+
+// one card per micro:bit, rebuilt only when the cast changes
+function syncStage() {
+  if (!stageOpen()) return;
+  const grid = stageDoc.getElementById("gym-stage-grid");
+  if (!grid) return;
+  const want = world.mbits.map(m => m.id + m.name + m.colour).join(",");
+  if (grid.dataset.ids === want) return;
+  grid.dataset.ids = want;
+  grid.innerHTML = "";
+  stageCards = new Map();
+  const rows = [["light L / R", "ll"], ["line L / R", "ln"], ["sonar", "sn"],
+                ["light level", "lv"], ["compass", "cp"], ["motors L / R", "mo"],
+                ["speed", "sp"], ["battery", "ba"], ["radio group", "rg"]];
+  for (const m of world.mbits) {
+    const card = stageDoc.createElement("div");
+    card.className = "card";
+    card.innerHTML =
+      '<div class="top"><i class="dot" style="background:' + m.colour + '"></i><b>' + m.name +
+      '</b><span class="where"></span></div>' +
+      '<div class="body"><div class="scr">' + "<span></span>".repeat(25) + "</div>" +
+      "<table>" + rows.map(r => '<tr><td class="k">' + r[0] + '</td><td class="v" data-f="' + r[1] + '">-</td></tr>').join("") +
+      "</table></div>" +
+      '<div class="leds">' + "<i></i>".repeat(12) + "</div>";
+    grid.appendChild(card);
+    const f = {};
+    card.querySelectorAll("[data-f]").forEach(td => f[td.dataset.f] = td);
+    stageCards.set(m.id, {
+      card: card, cells: card.querySelectorAll(".scr span"),
+      leds: card.querySelectorAll(".leds i"), where: card.querySelector(".where"), f: f
+    });
+  }
+}
+
+function updateStage() {
+  if (!stageOpen()) { if (stageWin && stageWin.closed) closeStage(); return; }
+  syncStage();
+  const dash = "—";
+  for (const m of world.mbits) {
+    const c = stageCards.get(m.id);
+    if (!c) continue;
+    const b = botOf(m);
+    for (let i = 0; i < 25; i++) c.cells[i].classList.toggle("on", !!m.screen[i]);
+    c.where.textContent = b ? "in " + b.name : "in hand";
+    c.card.classList.toggle("idle", !m.code.trim());
+    c.f.lv.textContent = readScreenLight(m);
+    c.f.cp.textContent = compassHeadingDeg(m) + "°";
+    c.f.rg.textContent = m.radioGroup;
+    c.f.ll.textContent = b ? readLightSensor(b, "L") + " / " + readLightSensor(b, "R") : dash;
+    c.f.ln.textContent = b ? readLineSensor(b, "L") + " / " + readLineSensor(b, "R") : dash;
+    c.f.sn.textContent = b ? readSonar(b) + " cm" : dash;
+    c.f.mo.textContent = b ? Math.round(b.lm) + " / " + Math.round(b.rm) : dash;
+    c.f.sp.textContent = b ? Math.round((b.vl + b.vr) / 2) + " mm/s" : dash;
+    c.f.ba.textContent = b ? Math.round(b.batt) + "%" : dash;
+    for (let i = 0; i < 12; i++) {
+      const col = b ? b.pixels[i] : null;
+      c.leds[i].style.background = col && col !== "#000000" ? col : "#2a2f3c";
+      c.leds[i].style.boxShadow = col && col !== "#000000" ? "0 0 5px " + col : "none";
+    }
+  }
+  if (stageRoom) stageRoom.getContext("2d").drawImage(cv, 0, 0, stageRoom.width, stageRoom.height);
+}
+
+el("allDev").addEventListener("click", openStage);
 
 
 /* Installing as an app: the browser needs the worker registered, and that only
