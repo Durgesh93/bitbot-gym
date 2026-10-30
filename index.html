@@ -71,7 +71,7 @@ canvas#room { max-width: min(100%, 52vh); margin: 0 auto; }
   iframe#editor { height: 460px !important; }
 }
 /* for explaining at the board: give the blocks the width and keep just the room */
-body.wide .layout { grid-template-columns: minmax(0, 1fr) 340px; }
+body.wide .layout { grid-template-columns: minmax(0, 1fr) 430px; }
 body.wide iframe#editor, body.wide .editor-off { height: 700px; }
 @media (max-width: 820px)  { .layout { grid-template-columns: minmax(0,1fr); } }
 
@@ -169,7 +169,7 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
   <button id="allDev">Full screen</button>
   <button id="openHex">Open a .hex</button>
   <input type="file" id="hexFile" accept=".hex" hidden>
-  <button id="wide">Big blocks</button>
+  <button id="wide">Small blocks</button>
 </header>
 
 <div class="layout">
@@ -181,6 +181,7 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
       <div class="presets">
         <button id="addBot">Add Bit:Bot</button>
         <button id="addMbit">Add micro:bit</button>
+        <button id="renameDev">Rename</button>
         <button id="delDev">Remove</button>
         <button id="pullCode" class="go">Take the code &amp; run</button>
       </div>
@@ -247,7 +248,7 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
         If your robot reads the other way round, press the button above.</p>
       </div>
       <div class="panel">
-        <h2>What happened</h2>
+        <h2>Program log <span style="float:right;font-weight:400;text-transform:none;letter-spacing:0">what each board did, and when</span></h2>
         <div id="log"></div>
       </div>
     </div>
@@ -706,6 +707,7 @@ function say(msg, cls, m) {
     while (log.children.length > 400) log.removeChild(log.firstChild);
     log.scrollTop = log.scrollHeight;
     echoToStage(d);
+    echoToCard(d, m);
     return;
   }
   d.textContent = (simTime / 1000).toFixed(1).padStart(5) + "  " + msg;
@@ -715,7 +717,20 @@ function say(msg, cls, m) {
   echoToStage(d);
 }
 
-// the second window keeps its own copy of the log
+// one board's line also goes on that board's own card
+function echoToCard(d, m) {
+  if (!m || !stageOpen()) return;
+  const c = stageCards.get("m" + m.id);
+  if (!c || !c.log) return;
+  const line = d.cloneNode(true);
+  const tag = line.querySelector("b");
+  if (tag) tag.remove();                      // the card already says whose it is
+  c.log.appendChild(line);
+  while (c.log.children.length > 60) c.log.removeChild(c.log.firstChild);
+  c.log.scrollTop = c.log.scrollHeight;
+}
+
+// the running view keeps its own copy of the whole log
 function echoToStage(d) {
   if (!stageOpen()) return;
   const l = stageHost.querySelector("#stageLog");
@@ -1349,7 +1364,10 @@ async function runAll() {
   running = true;
   simTime = 0;
   log.innerHTML = "";
-  if (stageOpen()) stageHost.querySelector("#stageLog").innerHTML = "";
+  if (stageOpen()) {
+    stageHost.querySelector("#stageLog").innerHTML = "";
+    stageCards.forEach(c => { if (c.log) c.log.innerHTML = ""; });
+  }
   const live = world.mbits.filter(m => m.code.trim());
   if (!live.length) {
     say("nothing to run yet - build some blocks, or open a .hex", "err");
@@ -1542,11 +1560,29 @@ function drawBoard(m) {
     ctx.fillStyle = m.screen[r * 5 + c] ? "#ff3b3b" : "#2b2f38";
     ctx.fillRect(x + (c - 2.5) * cell, y + (r - 2.5) * cell, cell * 0.72, cell * 0.72);
   }
-  ctx.fillStyle = m.colour;
-  ctx.font = "bold " + Math.round(11 * (cv.width / 1100)) + "px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText(m.name, x, y - h / 2 - 5);
-  ctx.textAlign = "left";
+  nameBubble(m.name, x, y - h / 2 - 8, m.colour);
+}
+
+// a small speech bubble, so a name reads as a label and not as part of the floor
+function nameBubble(text, x, yBottom, colour) {
+  const f = Math.round(11.5 * (cv.width / 1100));
+  ctx.font = "bold " + f + "px system-ui, sans-serif";
+  const padX = f * 0.55, h = f * 1.75, w = ctx.measureText(text).width + padX * 2;
+  const top = yBottom - h - f * 0.45;
+  ctx.fillStyle = "rgba(13,16,23,0.9)";
+  ctx.strokeStyle = colour; ctx.lineWidth = 1.5;
+  roundRect(x - w / 2, top, w, h, h * 0.42);
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath();                                   // the little tail
+  ctx.moveTo(x - f * 0.34, top + h - 0.8);
+  ctx.lineTo(x, top + h + f * 0.5);
+  ctx.lineTo(x + f * 0.34, top + h - 0.8);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(13,16,23,0.9)"; ctx.fill();
+  ctx.fillStyle = colour;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(text, x, top + h / 2);
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
 }
 
 function drawBot(b) {
@@ -1595,11 +1631,7 @@ function drawBot(b) {
   }
   ctx.restore();
 
-  ctx.fillStyle = accent;
-  ctx.font = "bold " + Math.round(11 * (cv.width / 1100)) + "px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText(host ? host.name : b.name, b.x * S, (b.y - 72) * S);
-  ctx.textAlign = "left";
+  nameBubble(host ? host.name : b.name, b.x * S, (b.y - 70) * S, accent);
 }
 
 function roundRect(x, y, w, h, r) {
@@ -1781,9 +1813,9 @@ el("invert").addEventListener("click", e => {
 });
 el("wide").addEventListener("click", e => {
   document.body.classList.toggle("wide");
-  const on = document.body.classList.contains("wide");
-  e.target.classList.toggle("on", on);
-  e.target.textContent = on ? "Normal size" : "Big blocks";
+  const big = document.body.classList.contains("wide");
+  e.target.classList.toggle("on", big);
+  e.target.textContent = big ? "Small blocks" : "Big blocks";
 });
 el("run").addEventListener("click", () => { openStage(); runAll(); });
 el("stopBtn").addEventListener("click", () => stopAll(false));
@@ -2047,6 +2079,23 @@ function addDevice(kind) {
   draw(); instruments(); saveAll();
 }
 
+el("renameDev").addEventListener("click", () => {
+  const m = mbit();
+  const given = window.prompt("What is this one called?", m.name);
+  if (given === null) return;
+  const name = given.trim().slice(0, 18);
+  if (!name) return;
+  if (world.mbits.some(o => o !== m && o.name === name)) {
+    say("there is already one called " + name, "err");
+    return;
+  }
+  const was = m.name;
+  m.name = name;
+  if (m.bot) m.bot.name = name;
+  say(was + " is now called " + name, "say");
+  renderDevices(); draw(); instruments(); saveAll();
+  if (stageOpen()) { stageCards = new Map(); syncStage(); updateStage(); }
+});
 el("addBot").addEventListener("click", () => addDevice("bitbot"));
 el("addMbit").addEventListener("click", () => addDevice("microbit"));
 el("delDev").addEventListener("click", () => {
@@ -2182,8 +2231,9 @@ const STAGE_CSS = `
   #stage .bar .spacer { flex: 1; }
   #stage .view { flex: 1 1 auto; min-height: 0; display: grid; gap: 12px;
                  grid-template-columns: minmax(0, 42fr) minmax(0, 58fr); }
-  #stage .left { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
-  #stage canvas { width: 100%; height: auto; max-width: min(100%, 54vh); margin: 0 auto;
+  #stage .left { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
+  #stage .left h1 { margin: 2px 0 0; }
+  #stage canvas { width: 100%; height: auto; max-width: min(100%, 44vh); margin: 0 auto;
                   border-radius: 10px; background: #0d1017; display: block; }
   #stage .tools { display: flex; flex-wrap: wrap; gap: 6px; }
   #stage .tools button { padding: 5px 9px; font-size: 11.5px; }
@@ -2210,6 +2260,12 @@ const STAGE_CSS = `
   #stage .arms { display: flex; gap: 14px; margin-top: 8px; }
   #stage .arms > div { display: flex; align-items: center; gap: 5px; }
   #stage .arms b { font-size: 10px; color: var(--muted); font-weight: 600; }
+  #stage .mlog { margin-top: 8px; height: 72px; overflow: auto; background: #0d1017;
+      border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px;
+      font-family: var(--f-mono); font-size: 10.5px; line-height: 1.5; color: #c6d2e4; }
+  #stage .mlog div { white-space: pre-wrap; }
+  #stage .mlog div.err { color: #ff9a9a; }
+  #stage .mlog div.say { color: var(--warn); }
   #stage .press { display: flex; gap: 4px; margin-top: 8px; }
   #stage .press button { flex: 1; padding: 4px 2px; font-size: 11px; }
   #stage #stageLog { flex: 1 1 auto; min-height: 90px; overflow: auto; background: #0d1017;
@@ -2305,7 +2361,7 @@ function buildStage() {
     '</div>' +
     '<div class="view">' +
       '<div class="left"><div id="stageRoomSlot"></div><div id="stageToolSlot"></div>' +
-      '<div id="stageLog"></div></div>' +
+      '<h1 style="margin-top:12px">Program log</h1><div id="stageLog"></div></div>' +
       '<div class="cards" id="stageCardsBox"></div>' +
     '</div>';
   document.body.appendChild(stageHost);
@@ -2316,6 +2372,12 @@ function buildStage() {
   const sp = stageHost.querySelector("#stageSpeed");
   sp.value = el("speed").value;
   sp.addEventListener("change", e => { el("speed").value = e.target.value; });
+}
+
+function stageTick() {
+  if (!stageOpen()) return;
+  if (!running) { draw(); updateStage(); }   // while it runs, the sim loop does this
+  requestAnimationFrame(stageTick);
 }
 
 function openStage() {
@@ -2331,6 +2393,7 @@ function openStage() {
   l.scrollTop = l.scrollHeight;
   stageCards = new Map();
   syncStage(); updateStage();
+  requestAnimationFrame(stageTick);
 }
 
 function closeStage() {
@@ -2366,6 +2429,7 @@ function syncStage() {
         "<table>" + rows.map(r => '<tr><td class="k">' + r[0] + '</td><td class="v" data-f="' + r[1] + '">-</td></tr>').join("") +
         "</table></div>" +
         ARMS_HTML +
+        '<div class="mlog"></div>' +
         '<div class="press">' + ["A", "B", "AB", "shake"]
           .map(k => '<button data-k="' + k + '">' + (k === "AB" ? "A+B" : k === "shake" ? "Shake" : k) + "</button>").join("") +
         "</div>";
@@ -2380,7 +2444,8 @@ function syncStage() {
       card.querySelectorAll("[data-f]").forEach(td => f[td.dataset.f] = td);
       stageCards.set("m" + m.id, {
         card: card, cells: card.querySelectorAll(".scr span"),
-        leds: card.querySelectorAll(".leds i"), where: card.querySelector(".where"), f: f
+        leds: card.querySelectorAll(".leds i"), where: card.querySelector(".where"),
+        log: card.querySelector(".mlog"), f: f
       });
     }
     // the same chips as the bench, so you can still switch board up here
@@ -2439,6 +2504,8 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
    One press of "Normal size" brings the instruments and the log back. */
 furnish();
 addArrows();
+document.body.classList.add("wide");          // the blocks get the room by default
+el("wide").classList.add("on");
 draw();
 
 (async () => {
