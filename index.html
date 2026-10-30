@@ -167,7 +167,7 @@ footer { color: var(--muted); font-size: 11.5px; margin-top: 8px; flex: none; }
       <option value="8">8x</option>
     </select>
   </label>
-  <button id="allDev">All devices</button>
+  <button id="allDev">Full screen</button>
   <button id="openHex">Open a .hex</button>
   <input type="file" id="hexFile" accept=".hex" hidden>
   <button id="wide">Big blocks</button>
@@ -717,7 +717,7 @@ function killTimers(m) {
       and the board would really behave.
    ======================================================================== */
 const log = document.getElementById("log");
-let stageWin = null, stageDoc = null, stageHost = null, stageCards = new Map(), stageRoom = null;
+let stageHost = null, stageCards = new Map(), stageRoom = null;
 function say(msg, cls, m) {
   const d = document.createElement("div");
   if (cls) d.className = cls;
@@ -744,7 +744,7 @@ function say(msg, cls, m) {
 // the second window keeps its own copy of the log
 function echoToStage(d) {
   if (!stageOpen()) return;
-  const l = stageDoc.getElementById("gym-stage-log");
+  const l = stageHost.querySelector("#stageLog");
   if (!l) return;
   l.appendChild(d.cloneNode(true));
   while (l.children.length > 400) l.removeChild(l.firstChild);
@@ -1374,10 +1374,7 @@ async function runAll() {
   running = true;
   simTime = 0;
   log.innerHTML = "";
-  if (stageOpen()) {
-    const l = stageDoc.getElementById("gym-stage-log");
-    if (l) l.innerHTML = "";
-  }
+  if (stageOpen()) stageHost.querySelector("#stageLog").innerHTML = "";
   const live = world.mbits.filter(m => m.code.trim());
   if (!live.length) {
     say("nothing to run yet - build some blocks, or open a .hex", "err");
@@ -2140,129 +2137,151 @@ document.addEventListener("drop", e => {
        just build its DOM from here and keep it fed each frame.
    ======================================================================== */
 const STAGE_CSS = `
-  .gym-stage { font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif; font-size: 13px; color: #eef2f8; }
-  .gym-stage h1 { font-size: 14px; margin: 0 0 8px; letter-spacing: .08em; text-transform: uppercase; color: #9aa7bd; }
-  .gym-stage .wrap { display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: start; }
-  .gym-stage canvas { width: 100%; height: auto; border-radius: 10px; background: #0d1017; display: block; }
-  .gym-stage .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)); gap: 10px; }
-  .gym-stage .card { background: #1a1f2b; border: 1px solid #313a4e; border-radius: 12px; padding: 10px 12px; }
-  .gym-stage .top { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
-  .gym-stage .top b { font-size: 15px; }
-  .gym-stage .dot { width: 10px; height: 10px; border-radius: 50%; display: block; }
-  .gym-stage .where { margin-left: auto; font-size: 11px; color: #9aa7bd; }
-  .gym-stage .body { display: flex; gap: 10px; }
-  .gym-stage .scr { display: grid; grid-template-columns: repeat(5, 9px); gap: 3px; background: #08080c;
-                    padding: 7px; border-radius: 7px; height: max-content; }
-  .gym-stage .scr span { width: 9px; height: 9px; border-radius: 2px; background: #3a2a2a; display: block; }
-  .gym-stage .scr span.on { background: #ff3b3b; box-shadow: 0 0 5px #ff3b3b; }
-  .gym-stage table { border-collapse: collapse; width: 100%; font-size: 11.5px; }
-  .gym-stage td { padding: 1px 0; }
-  .gym-stage td.k { color: #9aa7bd; }
-  .gym-stage td.v { text-align: right; font-family: ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
-  .gym-stage .leds { display: flex; gap: 3px; margin-top: 7px; }
-  .gym-stage .leds i { width: 9px; height: 9px; border-radius: 50%; background: #2a2f3c; display: block; }
-  .gym-stage .card.idle { opacity: .55; }
-  .gym-stage #gym-stage-log { height: 300px; overflow: auto; background: #0d1017; border: 1px solid #313a4e;
-      border-radius: 10px; padding: 9px; font-family: ui-monospace, Menlo, monospace;
-      font-size: 11.5px; line-height: 1.55; color: #c6d2e4; }
-  .gym-stage #gym-stage-log div { white-space: pre-wrap; }
-  .gym-stage #gym-stage-log div.err { color: #ff9a9a; }
-  .gym-stage #gym-stage-log div.say { color: #f2b134; }
+  #stage { position: fixed; inset: 0; z-index: 40; background: var(--bg); display: none;
+           flex-direction: column; padding: 10px 12px 12px; }
+  #stage.on { display: flex; }
+  #stage .bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 10px; flex: 0 0 auto; min-height: 40px; align-content: center; }
+  #stage .bar .title { font-weight: 700; font-size: 16px; letter-spacing: .01em; }
+  #stage .bar .title span { color: var(--accent); }
+  #stage .bar .clock { font-family: var(--f-mono); color: var(--muted); font-size: 13px; }
+  #stage .bar .spacer { flex: 1; }
+  #stage .view { flex: 1 1 auto; min-height: 0; display: grid; gap: 12px;
+                 grid-template-columns: minmax(0, 42fr) minmax(0, 58fr); }
+  #stage .left { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  #stage canvas { width: 100%; height: auto; max-width: min(100%, 58vh); margin: 0 auto;
+                  border-radius: 10px; background: #0d1017; display: block; }
+  #stage .cards { overflow: auto; align-content: start; display: grid; gap: 10px;
+                  grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); }
+  #stage .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  #stage .card.idle { opacity: .5; }
+  #stage .top { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+  #stage .top b { font-size: 15px; }
+  #stage .dot { width: 10px; height: 10px; border-radius: 50%; display: block; }
+  #stage .where { margin-left: auto; font-size: 11px; color: var(--muted); }
+  #stage .body { display: flex; gap: 10px; }
+  #stage .scr { display: grid; grid-template-columns: repeat(5, 10px); gap: 3px; background: #08080c;
+                padding: 7px; border-radius: 7px; height: max-content; }
+  #stage .scr span { width: 10px; height: 10px; border-radius: 2px; background: #3a2a2a; display: block; }
+  #stage .scr span.on { background: var(--led-on); box-shadow: 0 0 5px var(--led-on); }
+  #stage table { border-collapse: collapse; width: 100%; font-size: 11.5px; }
+  #stage td { padding: 1px 0; }
+  #stage td.k { color: var(--muted); }
+  #stage td.v { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+  #stage .leds { display: flex; gap: 3px; margin-top: 7px; }
+  #stage .leds i { width: 9px; height: 9px; border-radius: 50%; background: #2a2f3c; display: block; }
+  #stage #stageLog { flex: 1 1 auto; min-height: 90px; overflow: auto; background: #0d1017;
+      border: 1px solid var(--line); border-radius: 10px; padding: 9px;
+      font-family: var(--f-mono); font-size: 11.5px; line-height: 1.55; color: #c6d2e4; }
+  #stage #stageLog div { white-space: pre-wrap; }
+  #stage #stageLog div.err { color: #ff9a9a; }
+  #stage #stageLog div.say { color: var(--warn); }
+  @media (max-width: 900px) { #stage .view { grid-template-columns: minmax(0,1fr); } }
 `;
 
-const STAGE_HTML =
-  '<div class="wrap"><div><h1>The room</h1><canvas id="gym-stage-room" width="600" height="600"></canvas>' +
-  '<h1 style="margin-top:14px">What happened</h1><div id="gym-stage-log"></div></div>' +
-  '<div><h1>Every board</h1><div class="grid" id="gym-stage-grid"></div></div></div>';
+const stageOpen = () => !!stageHost && stageHost.classList.contains("on");
 
-const stageOpen = () => !!stageDoc && !(stageWin && stageWin.closed);
+/* The running view: the room and every board, with the building put away.
+   One page, no pop-up windows to be blocked or lost behind the browser. */
+function buildStage() {
+  if (stageHost) return;
+  const st = document.createElement("style");
+  st.textContent = STAGE_CSS;
+  document.head.appendChild(st);
 
-/* Its own window if the browser allows one, and a panel over the gym if not -
-   a blocked pop-up should not cost you the view. */
+  stageHost = document.createElement("div");
+  stageHost.id = "stage";
+  stageHost.innerHTML =
+    '<div class="bar">' +
+      '<span class="title">Bit:Bot <span>Gym</span></span>' +
+      '<span class="clock" id="stageClock">0.0 s</span>' +
+      '<span id="stageChips" style="display:flex;gap:6px;flex-wrap:wrap"></span>' +
+      '<span class="spacer"></span>' +
+      '<button id="stageRun" class="go">Run</button>' +
+      '<button id="stageStop" class="stop">Stop</button>' +
+      '<label class="inline">Speed <select id="stageSpeed">' +
+        '<option value="1">1x</option><option value="2">2x</option>' +
+        '<option value="4">4x</option><option value="8">8x</option></select></label>' +
+      '<button id="stageBack" class="on">Back to blocks</button>' +
+    '</div>' +
+    '<div class="view">' +
+      '<div class="left"><canvas id="stageRoom" width="620" height="620"></canvas>' +
+      '<div id="stageLog"></div></div>' +
+      '<div class="cards" id="stageCardsBox"></div>' +
+    '</div>';
+  document.body.appendChild(stageHost);
+
+  stageRoom = stageHost.querySelector("#stageRoom");
+  stageHost.querySelector("#stageBack").addEventListener("click", closeStage);
+  stageHost.querySelector("#stageRun").addEventListener("click", runAll);
+  stageHost.querySelector("#stageStop").addEventListener("click", () => stopAll(false));
+  const sp = stageHost.querySelector("#stageSpeed");
+  sp.value = el("speed").value;
+  sp.addEventListener("change", e => { el("speed").value = e.target.value; });
+}
+
 function openStage() {
-  if (stageOpen()) { if (stageWin) stageWin.focus(); return; }
-  stageWin = null;
-  try { stageWin = window.open("", "bitbot-gym-stage", "width=1200,height=840"); } catch (e) { stageWin = null; }
-
-  if (stageWin) {
-    stageWin.document.open();
-    stageWin.document.write('<!doctype html><meta charset="utf-8"><title>Bit:Bot Gym - all devices</title>' +
-      "<style>body{margin:0;padding:12px;background:#11141c}" + STAGE_CSS + "</style>" +
-      '<body class="gym-stage">' + STAGE_HTML);
-    stageWin.document.close();
-    stageDoc = stageWin.document;
-    stageHost = stageDoc.body;
-    window.addEventListener("beforeunload", () => { if (stageWin && !stageWin.closed) stageWin.close(); });
-  } else {
-    say("the browser blocked a second window, so the view is here instead - allow pop-ups to get its own window", "say");
-    let host = document.getElementById("gym-stage-overlay");
-    if (!host) {
-      const st = document.createElement("style");
-      st.textContent = STAGE_CSS + `
-        #gym-stage-overlay { position: fixed; inset: 0; z-index: 40; background: #11141c;
-          padding: 14px; overflow: auto; }
-        #gym-stage-overlay .closer { position: absolute; top: 14px; right: 16px; }`;
-      document.head.appendChild(st);
-      host = document.createElement("div");
-      host.id = "gym-stage-overlay";
-      host.className = "gym-stage";
-      host.innerHTML = '<button class="closer" id="gym-stage-close">Close</button>' + STAGE_HTML;
-      document.body.appendChild(host);
-      host.querySelector("#gym-stage-close").addEventListener("click", closeStage);
-    }
-    host.hidden = false;
-    stageDoc = document;
-    stageHost = host;
-  }
+  buildStage();
+  stageHost.classList.add("on");
+  stageHost.querySelector("#stageSpeed").value = el("speed").value;
+  const l = stageHost.querySelector("#stageLog");
+  l.innerHTML = "";
+  for (const d of log.children) l.appendChild(d.cloneNode(true));
+  l.scrollTop = l.scrollHeight;
   stageCards = new Map();
-  stageRoom = stageDoc.getElementById("gym-stage-room");
-  const l = stageDoc.getElementById("gym-stage-log");
-  if (l) { l.innerHTML = ""; for (const d of log.children) l.appendChild(d.cloneNode(true)); l.scrollTop = l.scrollHeight; }
   syncStage(); updateStage();
 }
 
 function closeStage() {
-  if (stageWin && !stageWin.closed) stageWin.close();
-  const host = document.getElementById("gym-stage-overlay");
-  if (host) host.hidden = true;
-  stageWin = null; stageDoc = null; stageHost = null; stageRoom = null; stageCards = new Map();
+  if (stageHost) stageHost.classList.remove("on");
+  draw(); instruments();
 }
 
 // one card per micro:bit, rebuilt only when the cast changes
 function syncStage() {
   if (!stageOpen()) return;
-  const grid = stageDoc.getElementById("gym-stage-grid");
-  if (!grid) return;
+  const grid = stageHost.querySelector("#stageCardsBox");
   const want = world.mbits.map(m => m.id + m.name + m.colour).join(",");
-  if (grid.dataset.ids === want) return;
-  grid.dataset.ids = want;
-  grid.innerHTML = "";
-  stageCards = new Map();
-  const rows = [["light L / R", "ll"], ["line L / R", "ln"], ["sonar", "sn"],
-                ["light level", "lv"], ["compass", "cp"], ["motors L / R", "mo"],
-                ["speed", "sp"], ["battery", "ba"], ["radio group", "rg"]];
-  for (const m of world.mbits) {
-    const card = stageDoc.createElement("div");
-    card.className = "card";
-    card.innerHTML =
-      '<div class="top"><i class="dot" style="background:' + m.colour + '"></i><b>' + m.name +
-      '</b><span class="where"></span></div>' +
-      '<div class="body"><div class="scr">' + "<span></span>".repeat(25) + "</div>" +
-      "<table>" + rows.map(r => '<tr><td class="k">' + r[0] + '</td><td class="v" data-f="' + r[1] + '">-</td></tr>').join("") +
-      "</table></div>" +
-      '<div class="leds">' + "<i></i>".repeat(12) + "</div>";
-    grid.appendChild(card);
-    const f = {};
-    card.querySelectorAll("[data-f]").forEach(td => f[td.dataset.f] = td);
-    stageCards.set(m.id, {
-      card: card, cells: card.querySelectorAll(".scr span"),
-      leds: card.querySelectorAll(".leds i"), where: card.querySelector(".where"), f: f
+  if (grid.dataset.ids !== want) {
+    grid.dataset.ids = want;
+    grid.innerHTML = "";
+    stageCards = new Map();
+    const rows = [["light L / R", "ll"], ["line L / R", "ln"], ["sonar", "sn"],
+                  ["light level", "lv"], ["compass", "cp"], ["motors L / R", "mo"],
+                  ["speed", "sp"], ["battery", "ba"], ["radio group", "rg"]];
+    for (const m of world.mbits) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML =
+        '<div class="top"><i class="dot" style="background:' + m.colour + '"></i><b>' + m.name +
+        '</b><span class="where"></span></div>' +
+        '<div class="body"><div class="scr">' + "<span></span>".repeat(25) + "</div>" +
+        "<table>" + rows.map(r => '<tr><td class="k">' + r[0] + '</td><td class="v" data-f="' + r[1] + '">-</td></tr>').join("") +
+        "</table></div>" +
+        '<div class="leds">' + "<i></i>".repeat(12) + "</div>";
+      grid.appendChild(card);
+      const f = {};
+      card.querySelectorAll("[data-f]").forEach(td => f[td.dataset.f] = td);
+      stageCards.set(m.id, {
+        card: card, cells: card.querySelectorAll(".scr span"),
+        leds: card.querySelectorAll(".leds i"), where: card.querySelector(".where"), f: f
+      });
+    }
+    // the same chips as the bench, so you can still switch board up here
+    const chips = stageHost.querySelector("#stageChips");
+    chips.innerHTML = "";
+    world.mbits.forEach((m, i) => {
+      const c = document.createElement("button");
+      c.className = "chip";
+      c.style.borderColor = m.colour;
+      c.innerHTML = '<i style="background:' + m.colour + '"></i>' + m.name;
+      c.addEventListener("click", () => { world.sel = i; renderDevices(); showProjectOf(m); });
+      chips.appendChild(c);
     });
   }
 }
 
 function updateStage() {
-  if (!stageOpen()) { if (stageWin && stageWin.closed) closeStage(); return; }
+  if (!stageOpen()) return;
   syncStage();
   const dash = "—";
   for (const m of world.mbits) {
@@ -2287,6 +2306,7 @@ function updateStage() {
       c.leds[i].style.boxShadow = col && col !== "#000000" ? "0 0 5px " + col : "none";
     }
   }
+  stageHost.querySelector("#stageClock").textContent = (simTime / 1000).toFixed(1) + " s";
   if (stageRoom) stageRoom.getContext("2d").drawImage(cv, 0, 0, stageRoom.width, stageRoom.height);
 }
 
