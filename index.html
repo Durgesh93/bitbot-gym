@@ -2634,8 +2634,11 @@ function openNamer(bx) {
 function closeNamer(apply) {
   const inp = el("objName"), bx = namingBox;
   const typed = inp.value.trim();
-  inp.hidden = true;
+  /* Forget what we are naming FIRST. Hiding the box takes the cursor out of it,
+     which fires blur there and then, and blur calls this very function again -
+     so anything done before this line gets done twice, and you got two lamps. */
   namingBox = null;
+  inp.hidden = true;
   if (apply && bx) {
     if (!typed) {                                   // nothing typed: take it away again
       world.boxes = world.boxes.filter(o => o !== bx);
