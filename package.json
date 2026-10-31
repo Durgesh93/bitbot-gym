@@ -9,7 +9,7 @@
     "build": "vite build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build:ship": "vite build --mode ship"
+    "build:ship": "vite build --mode ship && node tools/ship.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.4",

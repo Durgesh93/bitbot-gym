@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bit:Bot Gym</title>
+<!-- The gym has to survive a school wifi dropping out mid-lesson, so it is
+     an installable offline app. These four lines and sw.js are the whole of
+     that, and they have to live in the ENTRY rather than in index.html,
+     because index.html is now a build artifact that this file produces. -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f4f6fb">
+<link rel="icon" href="icon-192.png">
 <meta name="description" content="A Bit:Bot XL simulator with the real MakeCode block editor.">
 </head>
 <body>
