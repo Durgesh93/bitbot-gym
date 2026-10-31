@@ -13,31 +13,42 @@
    teacher helping one child should be able to glance up and see which of
    the other nine are stuck. */
 
-/* THE PALETTE IS THE EDITOR'S.
+/* THE PALETTE IS THE EDITOR'S, AND THE PAGE IS WHITE BECAUSE OF IT.
 
    These are not colours I chose. They are the MakeCode drawer colours,
    read out of the cached editor bundle the class actually uses
    (~/.pxt/mkc-cache/...target.json, the `//% color=` on each namespace),
    which are the same colours as the printed cheatsheet. A child who knows
    that sound blocks are the red drawer and sensing blocks are the magenta
-   one gets that knowledge back here for free, and the gym stops looking
-   like a generic dashboard and starts looking like part of the same world
-   as the editor.
+   one gets that knowledge back here for free.
 
-   The base is near-black with a violet cast rather than the usual slate,
-   because magenta and orange sit badly on blue-grey and sing on this. */
+   Which settles the background. Those nine hues were chosen by somebody
+   drawing blocks on a white editor canvas, and they are at their most
+   distinct there - on near-black they all have to be lifted and shifted
+   until half of them are no longer the colour on the cheatsheet. A light
+   page lets every one of them be used UNCHANGED, at full strength, which
+   is the only way the gym and the editor can really match. It is also the
+   right call for a classroom: a projector washes a dark theme out to mud,
+   and the gym is on a projector most of the time it is on.
+
+   Two things stay dark, because they are dark objects and not chrome: the
+   LED screen (an unlit LED is black, and a light grey grid of them would
+   teach the wrong thing) and the wells - the room, the log, the code box -
+   which read as things seen INTO rather than panels sat on. */
 
 :root {
-  --bg: #0a0913;
-  --panel: #161526;
-  --panel-2: #211f36;
-  --sunk: #07060e;              /* a well: screens, tracks, the log */
-  --line: #2f2c47;
-  --line-2: #433f63;
-  --fg: #f2f0fa;
-  --muted: #9a93b8;
+  --bg: #f4f6fb;                /* the page */
+  --panel: #ffffff;             /* a card */
+  --panel-2: #eef1f7;           /* a control, and a card's quieter rows */
+  --panel-3: #e4e9f3;           /* a control under the pointer */
+  --sunk: #10141c;              /* a dark well: the room, the log, the code */
+  --well: #e7ebf3;              /* a light recess: tracks, beams, pads */
+  --line: #dfe4ee;
+  --line-2: #c3cbdb;
+  --fg: #1a2230;
+  --muted: #68718a;
 
-  /* straight from the drawers */
+  /* straight from the drawers, and used as they are */
   --d-basic: #1E90FF;
   --d-input: #D400D4;
   --d-music: #E63022;
@@ -48,20 +59,26 @@
   --d-vars: #DC143C;
   --d-bitbot: #e7660b;
 
-  /* the same hues, lifted enough to read on near-black */
-  --accent: #46a3ff;            /* Basic - the app's own chrome */
-  --mb: #ef5cef;                /* Input - the board's half of a card */
-  --bb: #ff8f44;                /* Bit:Bot - the chassis's half */
-  --go: #2fd36f;                /* Loops */
-  --stop: #ff5f6d;              /* Variables */
-  --warn: #f5b325;
-  --teal: #27cfd1;              /* Logic - distance */
-  --hot: #ff6b4a;               /* Music - sound */
-  --led: #ff2e2e;
+  /* the same hues, taken down only where a thin 9px label or small text
+     has to carry them - a fill never needs it, a letterform always does */
+  --accent: #0b6fd4;            /* Basic - the app's own chrome */
+  --mb: #b800b8;                /* Input - the board's half of a card */
+  --bb: #c25309;                /* Bit:Bot - the chassis's half */
+  --go: #0a7a3d;                /* Loops */
+  --stop: #c81432;              /* Variables */
+  --warn: #f5b325;              /* a fill only */
+  --warn-ink: #8d6200;          /* ...and its text */
+  --teal: #0a8486;              /* Logic - distance */
+  --hot: #d8291b;               /* Music - sound */
+  --led: #ff2e2e;               /* on the black screen, so unchanged */
 
   --f-ui: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
-  color-scheme: dark;
+
+  /* One overshoot curve for everything that appears, so a new card and an
+     opening card move like parts of the same machine. */
+  --spring: cubic-bezier(.22, 1.4, .4, 1);
+  color-scheme: light;
 }
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--fg); height: 100%; }
@@ -77,12 +94,12 @@ button, select, input[type=number] {
   border: 1px solid var(--line); border-radius: 9px; padding: 6px 12px; cursor: pointer;
   transition: background .12s, border-color .12s, color .12s;
 }
-button:hover { border-color: var(--line-2); background: #2a2742; }
-button.go { background: #10351f; border-color: #2a8a4d; color: #7bedaa; font-weight: 600; }
-button.go:hover { background: #164828; border-color: var(--go); }
-button.on { background: var(--accent); border-color: var(--accent); color: #04172b; font-weight: 700; }
+button:hover { border-color: var(--line-2); background: var(--panel-3); }
+button.go { background: #e6f8ed; border-color: #58bd87; color: #07682f; font-weight: 600; }
+button.go:hover { background: #d4f2e1; border-color: var(--go); }
+button.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 button.quiet { color: var(--muted); }
-button.quiet:hover { color: #ffc9cb; border-color: #7a3540; background: #2c171e; }
+button.quiet:hover { color: var(--stop); border-color: #eab3bc; background: #fdeef1; }
 button:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
 }
@@ -109,7 +126,7 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; color: var(-
 .gym > header nav button { text-transform: capitalize; border: none; background: transparent;
                            border-radius: 8px; padding: 5px 14px; color: var(--muted); }
 .gym > header nav button:hover { background: var(--panel-2); color: var(--fg); }
-.gym > header nav button.on { background: var(--accent); color: #04172b; font-weight: 700; }
+.gym > header nav button.on { background: var(--accent); color: #fff; font-weight: 700; }
 
 main { flex: 1 1 auto; min-height: 0; }
 main.tab-room { display: grid; gap: 12px; grid-template-columns: minmax(0, 54fr) minmax(0, 46fr); }
@@ -122,7 +139,7 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 .roomview canvas { width: auto; height: auto; max-width: 100%; max-height: 100%;
                    border-radius: 12px; background: var(--sunk); display: block; margin: 0 auto;
                    touch-action: none; cursor: grab;
-                   box-shadow: 0 10px 34px rgba(0,0,0,.45), 0 0 0 1px var(--line); }
+                   box-shadow: 0 10px 30px rgba(26,34,48,.16), 0 0 0 1px var(--line); }
 .roomview canvas:active { cursor: grabbing; }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: none; }
 .tools .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
@@ -145,26 +162,30 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
                padding: 26px; text-align: center; }
 
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-        padding: 12px 13px 11px; transition: background .15s, border-color .15s, box-shadow .15s; }
+        padding: 12px 13px 11px; box-shadow: 0 1px 2px rgba(26,34,48,.05);
+        transition: background .15s, border-color .15s, box-shadow .15s;
+        animation: arrive .34s var(--spring) both; }
 /* the state of a robot is a colour before it is a word */
-.card.live { background: #112a1c; border-color: #2a8a4d;
-              box-shadow: inset 3px 0 0 var(--go), 0 0 22px -6px rgba(47,211,111,.4); }
-.card.hold { box-shadow: inset 3px 0 0 var(--accent); }
-.card.off  { background: #221520; border-color: #7a3540; box-shadow: inset 3px 0 0 var(--stop); }
+.card.live { background: #f1fbf5; border-color: #8ed7ae;
+              box-shadow: inset 3px 0 0 var(--go), 0 6px 20px -10px rgba(10,122,61,.45);
+              animation: wake .45s var(--spring) both; }
+.card.hold { box-shadow: inset 3px 0 0 var(--accent); animation: wake .45s var(--spring) both; }
+.card.off  { background: #fdf2f4; border-color: #eeb8c1; box-shadow: inset 3px 0 0 var(--stop);
+             animation: halt .45s ease-out both; }
 .card.off .scr, .card.off .gauges { opacity: .5; }
 
 .card .top { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
 .card .top b { font-size: 15.5px; letter-spacing: -.01em; }
 .card .ctime { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted);
                font-variant-numeric: tabular-nums; }
-.card.live .ctime { color: #7bedaa; }
+.card.live .ctime { color: var(--go); }
 
 .st { font-size: 9px; letter-spacing: .09em; text-transform: uppercase; font-weight: 800;
       border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; color: var(--muted); }
-.st[data-st="run"]  { color: #7bedaa; border-color: #2a8a4d; background: #0f2a1a; }
-.st[data-st="stop"] { color: #ffb4bc; border-color: #7a3540; background: #2c171e; }
-.st[data-st="wait"] { color: #bfe3f5; border-color: #2a5e84; background: #0e2030; }
-.st[data-st="end"]  { color: #d8c6ff; border-color: var(--d-led); background: #1c1333; }
+.st[data-st="run"]  { color: #07682f; border-color: #58bd87; background: #e6f8ed; }
+.st[data-st="stop"] { color: #a81229; border-color: #eab3bc; background: #fdeef1; }
+.st[data-st="wait"] { color: #0a5fa8; border-color: #9ccdf0; background: #e9f4fd; }
+.st[data-st="end"]  { color: #4d2585; border-color: #c0a5e4; background: #f2ebfc; }
 
 .card .run, .card .press { display: flex; gap: 5px; }
 .card .press { margin-top: 9px; }
@@ -173,16 +194,16 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 /* a held button stays held, and that is `reads` coming back round from the
    board - not a useState pretending */
 .card .press button.down { background: var(--mb); border-color: var(--mb);
-                           color: #2b0320; font-weight: 700; }
+                           color: #fff; font-weight: 700; }
 
 /* two halves, with a rule between them */
 .sect { display: flex; align-items: center; gap: 8px; margin: 13px 0 8px;
         font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; font-weight: 800; }
 .sect:after { content: ""; flex: 1; height: 1px; }
 .sect.mb { color: var(--mb); }
-.sect.mb:after { background: linear-gradient(90deg, #6b2a6b, transparent); }
+.sect.mb:after { background: linear-gradient(90deg, #f0c2f0, transparent); }
 .sect.bb { color: var(--bb); }
-.sect.bb:after { background: linear-gradient(90deg, #7a3f14, transparent); }
+.sect.bb:after { background: linear-gradient(90deg, #f8d3b4, transparent); }
 
 .mbrow { display: flex; gap: 13px; align-items: flex-start; }
 .gauges { display: grid; gap: 7px; flex: 1; min-width: 0; align-content: start; }
@@ -196,9 +217,15 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 .scr { display: grid; grid-template-columns: repeat(5, 13px); gap: 3.5px; background: #07080c;
        padding: 9px; border-radius: 9px; height: max-content; flex: none;
        border: 1px solid #1d222e; box-shadow: inset 0 1px 7px rgba(0,0,0,.8); }
+/* PHOSPHOR. A real LED does not switch off, it falls off, and the gap is
+   not cosmetic: at `basic.showString` speed an instant-off matrix shows a
+   child one disconnected letter at a time, while a trailing one shows the
+   word moving. Fast on, slow off - which is the asymmetry a real one has,
+   so a 100 ms animation frame in a program reads as motion here too. */
 .scr span { width: 13px; height: 13px; border-radius: 2.5px; display: block;
-            background: #2b1116; }
-.scr span.on { background: var(--led); }
+            background: #2b1116; transition: background .24s ease-out, box-shadow .24s ease-out; }
+.scr span.on { background: var(--led); box-shadow: 0 0 6px rgba(255,46,46,.55);
+               transition: background .03s linear, box-shadow .03s linear; }
 .scr.dim { filter: saturate(.4) brightness(.7); }
 
 /* ---- a row: label, something to look at, the number ------------------ */
@@ -216,12 +243,12 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
    strobes at 60 fps and a child watching for "is it getting brighter?"
    cannot see the trend through the flicker - but the number is what the
    block returns, so it has to be honest to the millisecond. */
-.track { height: 8px; border-radius: 5px; background: var(--sunk);
+.track { height: 8px; border-radius: 5px; background: var(--well);
          border: 1px solid var(--line); overflow: hidden; display: block; }
 .track i { display: block; height: 100%; border-radius: 4px; background: var(--accent);
            transition: width .09s linear; }
-.track i.t-warm { background: linear-gradient(90deg, #7d5c18, var(--warn)); }
-.track i.t-hot  { background: linear-gradient(90deg, #7d2a18, var(--hot)); }
+.track i.t-warm { background: linear-gradient(90deg, #f2cf74, var(--warn)); }
+.track i.t-hot  { background: linear-gradient(90deg, #f0a093, var(--hot)); }
 
 /* ---- the two light eyes, as a balance -------------------------------- */
 
@@ -230,34 +257,34 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 .eyes .num { font-size: 11.5px; }
 .eyes .num.l { text-align: left; }
 .bal { display: flex; align-items: center; }
-.half { flex: 1; height: 10px; background: var(--sunk); border: 1px solid var(--line);
+.half { flex: 1; height: 10px; background: var(--well); border: 1px solid var(--line);
         display: flex; overflow: hidden; }
 .half.lh { border-radius: 6px 0 0 6px; justify-content: flex-end; border-right: none; }
 .half.rh { border-radius: 0 6px 6px 0; justify-content: flex-start; border-left: none; }
-.half i { height: 100%; background: #2a7f80; transition: width .09s linear; }
+.half i { height: 100%; background: #35b0b2; transition: width .09s linear; }
 /* whichever eye is winning goes gold, because "turn towards the brighter
    one" is every light-chasing program in the course */
-.half i.lead { background: linear-gradient(90deg, #7d5c18, var(--warn)); }
+.half i.lead { background: linear-gradient(90deg, #f2cf74, var(--warn)); }
 .bal .pin { width: 2px; height: 15px; background: var(--line-2); flex: none; border-radius: 1px; }
 
 /* ---- the sonar ------------------------------------------------------- */
 
-.beam { position: relative; height: 10px; border-radius: 6px; background: var(--sunk);
+.beam { position: relative; height: 10px; border-radius: 6px; background: var(--well);
         border: 1px solid var(--line); display: block; }
 .beam .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px 0 0 5px;
-              background: linear-gradient(90deg, #103a3b, #1d7778); transition: width .09s linear; }
+              background: linear-gradient(90deg, #bfe9ea, #2aa6a8); transition: width .09s linear; }
 .beam .wall { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px;
               border-radius: 2px; background: var(--teal); transition: left .09s linear; }
 .sonar .num { font-size: 11.5px; }
 .sonar.amber .beam .wall { background: var(--warn); }
-.sonar.amber .num { color: var(--warn); }
+.sonar.amber .num { color: var(--warn-ink); }
 .sonar.red .beam .wall { background: var(--stop); box-shadow: 0 0 8px var(--stop); }
-.sonar.red .num { color: #ff9a9a; font-weight: 700; }
+.sonar.red .num { color: var(--stop); font-weight: 700; }
 
 /* ---- the line sensors ------------------------------------------------ */
 
 .pads { display: flex; gap: 8px; }
-.pads i { width: 14px; height: 14px; border-radius: 50%; background: var(--sunk);
+.pads i { width: 14px; height: 14px; border-radius: 50%; background: var(--well);
           border: 1px solid var(--line); display: block; transition: background .09s, box-shadow .09s; }
 .pads i.dark { background: var(--warn); border-color: var(--warn);
                box-shadow: 0 0 8px rgba(242,177,52,.65); }
@@ -266,12 +293,12 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 /* ---- the compass tape ------------------------------------------------ */
 
 .tape { position: relative; display: block; height: 20px; overflow: hidden;
-        background: var(--sunk); border: 1px solid var(--line); border-radius: 6px;
+        background: var(--well); border: 1px solid var(--line); border-radius: 6px;
         /* the fade is what hides a mark wrapping from one edge to the other */
         -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
         mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent); }
 .tape b { position: absolute; top: 50%; transform: translate(-50%, -50%);
-          font-size: 9.5px; font-weight: 800; letter-spacing: .06em; color: #c3d0e4; }
+          font-size: 9.5px; font-weight: 800; letter-spacing: .06em; color: #3a4560; }
 .tape b.minor { font-size: 8px; font-weight: 600; color: var(--muted); }
 .tape .here { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
               margin-left: -.5px; background: var(--stop); opacity: .85; }
@@ -285,7 +312,7 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 .pix .lab { width: 42px; flex: none; }
 .pix .arm { display: inline-flex; gap: 3.5px; }
 .pix .gap { width: 11px; }
-.pix i { width: 10px; height: 10px; border-radius: 50%; background: #10141d;
+.pix i { width: 10px; height: 10px; border-radius: 50%; background: #cdd4e1;
          border: 1px solid var(--line); display: block; transition: background .09s, box-shadow .09s; }
 
 /* ---- the compact card ------------------------------------------------
@@ -343,6 +370,71 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
                     background: var(--sunk); color: #c6d2e4; border: 1px solid var(--line);
                     border-radius: 12px; padding: 12px 14px;
                     font-family: var(--f-mono); font-size: 13px; line-height: 1.6; }
+
+/* ===========================================================================
+   MOTION, and what each piece of it is FOR.
+
+   None of it is decoration. A gym with ten robots in it is a room where
+   something changed and you did not see which thing, and every animation
+   here answers that one question - WHAT JUST HAPPENED, AND WHERE. A card
+   springing in says where the new robot's panel went. A green wash says
+   that one started. A fading tail on the floor says that one is moving.
+   A pink ring says a message left. Take them away and all of it still
+   works; you just have to find it yourself.
+
+   Which is also the rule for how long they last. Everything here is under
+   half a second and none of it delays anything: the number is already
+   correct on the first frame of every one of these, because the numbers
+   come from the snapshot and the snapshot does not wait for CSS.
+   =========================================================================== */
+
+/* a new card, landing */
+@keyframes arrive {
+  from { opacity: 0; transform: translateY(9px) scale(.975); }
+  to   { opacity: 1; transform: none; }
+}
+/* somebody pressed Play. One pulse of the drawer green, outward. */
+@keyframes wake {
+  0%   { box-shadow: inset 3px 0 0 var(--go), 0 0 0 0 rgba(10,122,61,.35); }
+  55%  { box-shadow: inset 3px 0 0 var(--go), 0 0 0 7px rgba(10,122,61,0); }
+  100% { box-shadow: inset 3px 0 0 var(--go), 0 6px 20px -10px rgba(10,122,61,.45); }
+}
+/* and Stop: the same shape in the other colour, without the overshoot,
+   because stopping should not feel springy */
+@keyframes halt {
+  0%   { box-shadow: inset 3px 0 0 var(--stop), 0 0 0 0 rgba(200,20,50,.3); }
+  60%  { box-shadow: inset 3px 0 0 var(--stop), 0 0 0 6px rgba(200,20,50,0); }
+  100% { box-shadow: inset 3px 0 0 var(--stop); }
+}
+/* a folded card opening up. Only the contents move - the card itself is
+   laid out by the grid and animating that would shove the other nine. */
+@keyframes unfold {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+.card:not(.small) .panes { animation: unfold .26s var(--spring) both; }
+.card.small .mbrow { animation: unfold .2s ease-out both; }
+
+.caret { transition: color .12s, background .12s, transform .18s var(--spring); }
+.card:not(.small) .caret { transform: rotate(180deg); }
+
+/* The log is a conversation, so a new line should read as arriving rather
+   than as the whole block having silently shifted up a row. */
+@keyframes said { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; } }
+.log div { animation: said .18s ease-out both; }
+
+/* REDUCED MOTION IS NOT A LESSER GYM.
+   Every one of the above is a second way of saying something the colour,
+   the number or the pill already says, so turning all of it off loses no
+   information at all. The phosphor stays, because that one is not an
+   animation of the interface - it is what the hardware does, and a child
+   reading a scrolling message needs it. */
+@media (prefers-reduced-motion: reduce) {
+  .card, .card.live, .card.hold, .card.off,
+  .card:not(.small) .panes, .card.small .mbrow, .log div { animation: none; }
+  .caret, .track i, .half i, .beam .fill, .beam .wall { transition: none; }
+  .card:not(.small) .caret { transform: none; }
+}
 
 /* ===========================================================================
    Narrow: the room goes above the cards rather than beside them, which is

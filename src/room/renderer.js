@@ -250,8 +250,84 @@ function drawBody(b) {
   ctx.textAlign = "left";
 }
 
+/* WHERE IT HAS JUST BEEN.
+
+   A Bit:Bot turning on the spot and a Bit:Bot sitting still look identical
+   in a still picture, and "is it actually moving?" is the first question
+   anyone asks of a program that is not working. A fading tail answers it
+   without a word, and it also draws the SHAPE of what the program did - an
+   arc, a square, a wobble down a line - which is the thing the child was
+   trying to make and the thing they can now see they did or did not make.
+
+   It is drawn from the snapshots as they arrive and kept nowhere else, so
+   it cannot be the thing that corrupts the model: if the tail is wrong the
+   picture is wrong and every number is still right. */
+const TAIL = 110;                 // frames kept, so about 1.8 seconds
+const JUMP = 70;                  // mm in one frame that means "it teleported"
+
+function drawTails(trails, bodies) {
+  for (const b of bodies) {
+    const t = trails.get(b.id);
+    if (!t || t.length < 2) continue;
+    /* Older points are both fainter and thinner, which reads as depth: the
+       eye takes the fat bright end as "now" without being told. */
+    for (let i = 1; i < t.length; i++) {
+      const f = i / t.length;
+      ctx.strokeStyle = "rgba(91,192,235," + (f * f * 0.5).toFixed(3) + ")";
+      ctx.lineWidth = Math.max(1, f * 3.4 * S * 8);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(t[i - 1].x * S, t[i - 1].y * S);
+      ctx.lineTo(t[i].x * S, t[i].y * S);
+      ctx.stroke();
+    }
+  }
+}
+
+/* A MESSAGE, LEAVING.
+
+   Radio is the only thing the gym does that the room cannot show: two
+   boards talk and the floor looks exactly the same, so a child with the
+   wrong group number sees what a child with the right one sees. A ring
+   leaving the sender and a blink on whoever heard it turns the group
+   number into something you watch. A ring that reaches nobody is the
+   picture of a wrong group - and that is worth more than any error
+   message, because nothing went wrong. */
+const AIR = 900;                  // must match the room's own memory
+
+function drawRadio(snap) {
+  for (const a of snap.radio || []) {
+    const src = snap.bodies.find(b => b.id === a.from);
+    if (!src) continue;
+    const f = clamp((snap.t - a.t) / AIR, 0, 1);
+    const fade = (1 - f) * (1 - f);
+    /* two rings, one chasing the other, so a single send still reads as a
+       pulse rather than one lonely expanding circle */
+    for (const lead of [0, 0.28]) {
+      const g = f - lead;
+      if (g <= 0) continue;
+      ctx.beginPath();
+      ctx.arc(src.x * S, src.y * S, (src.r + g * 820) * S, 0, 7);
+      ctx.strokeStyle = "rgba(227,0,140," + (fade * 0.75).toFixed(3) + ")";
+      ctx.lineWidth = Math.max(1, 2.4 * S * 8 * fade);
+      ctx.stroke();
+    }
+    /* and a blink on each board that actually heard it */
+    for (const id of a.to || []) {
+      const h = snap.bodies.find(b => b.id === id);
+      if (!h) continue;
+      ctx.beginPath();
+      ctx.arc(h.x * S, h.y * S, (h.r + 7 + f * 10) * S, 0, 7);
+      ctx.strokeStyle = "rgba(255,255,255," + (fade * 0.85).toFixed(3) + ")";
+      ctx.lineWidth = Math.max(1, 2 * S * 8);
+      ctx.stroke();
+    }
+  }
+}
+
 export function createRoomRenderer(canvas) {
   const target = canvas.getContext("2d");
+  const trails = new Map();                             // id -> recent positions
   const lit = document.createElement("canvas");         // all the light, added up
   const one = document.createElement("canvas");         // one source at a time
   const stage = document.createElement("canvas");       // the furniture, on its own
@@ -448,6 +524,29 @@ export function createRoomRenderer(canvas) {
 
     /* The lamps and the robots come last, because a bulb and an LED are
        lights themselves - nothing dims them. */
+
+    /* The tail is collected here, where the snapshots arrive, and a big
+       step BREAKS it rather than being drawn: a dragged robot would
+       otherwise leave a straight line across the room it never drove, and
+       a tail that lies about where something has been is worse than no
+       tail at all. */
+    const seen = new Set();
+    for (const b of snap.bodies) {
+      seen.add(b.id);
+      let t = trails.get(b.id);
+      if (!t) { t = []; trails.set(b.id, t); }
+      const last = t[t.length - 1];
+      if (!last) t.push({ x: b.x, y: b.y });
+      else {
+        const d = Math.hypot(b.x - last.x, b.y - last.y);
+        if (d > JUMP) { t.length = 0; t.push({ x: b.x, y: b.y }); }
+        else if (d > 3) { t.push({ x: b.x, y: b.y }); if (t.length > TAIL) t.shift(); }
+      }
+    }
+    for (const id of [...trails.keys()]) if (!seen.has(id)) trails.delete(id);
+
+    drawTails(trails, snap.bodies);
+    drawRadio(snap);
 
     for (const L of snap.lamps) drawBulb(L);
     for (const b of snap.bodies) drawBody(b);

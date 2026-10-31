@@ -109,18 +109,41 @@ export function createRoom(options) {
      how far away the sender was - which is the whole of the lesson where
      two children walk apart until the signal drops. */
   let lastFrom = new Map();          // who each board heard from most recently
+
+  /* A short memory of what went over the air, for the PICTURE only.
+
+     Radio is the one thing in the gym with no visible cause: two boards
+     talk and the room shows nothing, so a child whose group number is
+     wrong sees exactly what a child whose group is right sees - nothing -
+     and has no way to tell which. A ring leaving the sender and a blink on
+     everyone who heard it makes the group number visible, and makes the
+     lesson where two children walk apart until the message stops arriving
+     something you can watch rather than infer.
+
+     It is kept here because the air is kept here, and it is an OBSERVATION
+     of a send that already happened - nothing reads it back, and dropping
+     it would change no number anywhere. */
+  let aired = [];
+  const AIR_MEMORY = 900;          // ms a ring stays worth drawing
+
   function wireFor(id) {
     return {
       send(kind, value, name) {
         const me = kit.get(id);
         if (!me) return;
+        const heard = [];
         for (const [other, k] of kit) {
           if (other === id) continue;
           if (k.board.state().group !== me.board.state().group) continue;
           lastFrom.set(other, id);
+          heard.push(other);
           k.machine.fire(kind === "number" ? "radioNumber"
                        : kind === "string" ? "radioString" : "radioValue", value, name);
         }
+        /* Recorded even when nobody heard it: a ring that leaves a robot
+           and reaches no one is the picture of a wrong group number. */
+        aired.push({ from: id, to: heard, t: clock.now });
+        if (aired.length > 24) aired = aired.slice(-24);
       },
       strength() {
         const from = lastFrom.get(id);
@@ -333,6 +356,9 @@ export function createRoom(options) {
       return got ? { ...b, senses: got.senses, reads: got.reads,
                      screen: got.screen, board: got.board, program: prog } : b;
     });
+    /* filtered, never pruned in place: a snapshot is a photograph and must
+       not change the thing it photographs */
+    s.radio = aired.filter(a => clock.now - a.t < AIR_MEMORY);
     return { t: clock.now, scene: sceneName, seed: seed, ...s };
   }
 
