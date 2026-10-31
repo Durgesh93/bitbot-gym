@@ -138,9 +138,13 @@ separate blocks were broken that way before anyone noticed.
 - **p5** - the room. Instance mode, used as a *renderer only*: our loop tells
   it when to draw. p5 must not own the animation loop, because the simulation
   steps in fixed 5 ms slices and that is what makes it repeatable.
-- **Vite** - dev server and build. `vite-plugin-singlefile` inlines everything
-  into one `index.html`, so the gym still opens by double-clicking and still
-  installs on a school Chromebook with no network.
+- **Vite** - dev server and build. `gym.html` is the source entry;
+  `npm run build:ship` inlines everything into `index.html`, which is an
+  artifact and not a file to edit. One file, no requests, so the gym still
+  opens by double-clicking and still installs on a school Chromebook with
+  no network. `tools/ship.mjs` undoes Vite's fingerprinting of the manifest
+  and the icon - sw.js caches those by their plain names - and refuses to
+  ship a build whose markup asks for anything else.
 - **Vitest** - tests. The model has no DOM in it, so they run in node in
   milliseconds.
 
@@ -296,7 +300,7 @@ bug in the card can make the gym *look* wrong. It cannot make it *be* wrong.
 
 ## Tests
 
-Six kinds, and `npm test` runs the lot. 275 of them today, in about two
+Six kinds, and `npm test` runs the lot. 285 of them today, in about three
 seconds, with no browser anywhere.
 
 - **unit** - each field and each piece of geometry on its own.
@@ -313,12 +317,59 @@ seconds, with no browser anywhere.
   names checked against the API the gym actually builds. The forgiving proxy
   means a block that goes missing answers `undefined` instead of throwing, so
   without this gate it would vanish silently and only a child would find out.
-- **regression** - every finished `.hex` in the course folder loaded and run
-  headless. *Still to write.* Eighteen of them. This is the gate the new gym
-  has to pass before it replaces the published one.
+- **regression** - whole programs, run the way a child's program runs:
+  in as TEXT, out through `prepare()`, `compile()`, the machine, the chassis
+  and the world, for several seconds of gym time. `test/app/samples.test.js`.
+  The five programs the Code tab offers, plus one that touches every block in
+  the Bit:Bot drawer; the examples live in `src/app/examples.js` so the menu a
+  child picks from and the programs the suite runs are the same text.
 
-## Migrating from the single file
+  Running the text is the point, and it is why this is not the same test as
+  **blocks** above. That one calls `api.bitbot.go()` straight off the object
+  and never touches the source transform - and the transform is where the
+  worst bug so far lived, turning `function wiggle()` into
+  `function await wiggle()` and killing every program that defined a function
+  of its own. No amount of calling blocks directly would have found it.
 
-The old `BitBot Gym.html` stays the published app until the new one passes the
-regression. Work moves one layer at a time, newest first, so there is never a
-day when the gym does not run.
+  It is deliberately loose about WHERE a robot ends up and strict about
+  whether anything went wrong. matter.js is not bit-identical run to run, so
+  pinning a millimetre buys a test that fails for the wrong reason every time
+  the engine updates.
+
+  (An earlier plan was to run all eighteen course `.hex` files headless. That
+  was dropped: it tested the hex pipeline, which is the lessons folder's
+  business, rather than the gym.)
+
+## The single file, and what happened to it
+
+**As of 31.10.2026 `index.html` is the OLD single-file gym again, on purpose.**
+The React build was shipped over it and pulled back within the hour, because
+the rebuild is not at feature parity: the old room has object editing (add,
+furnish, empty, name), floor-tape drawing, a trail toggle, "put robot back",
+the Plain / Light / Magnetic / Sonar sensor overlays, the robot-settings
+sliders (top speed, deadband, torch, grip, motor mismatch, battery, air
+resistance, light-sensor invert), "Open a .hex" and a stage mode - and the
+rebuild has none of them. Shipping was agreed; the gap was not, because I had
+not diffed the two toolbars before asking. **Parity first, then ship again**,
+and the check before shipping is that toolbar diff, not the test suite.
+
+The build pipeline below is real and works - `npm run build:ship` is what will
+ship it - it just must not be run against the live page until the list above
+is closed.
+
+`index.html` was the whole gym - one 169 KB file, hand-maintained - and will
+become the build artifact of everything under `src/`. The reason it stays one
+file either way is the classroom: the gym has to survive a school
+wifi dropping out mid-lesson, so it ships as one file with no requests and
+installs as an offline app.
+
+Which means **`index.html` is generated and must never be edited**. Change
+`gym.html` or `src/`, run `npm run build:ship`, commit the result. The PWA
+wiring - the manifest link, the theme colour, the icon, the service worker -
+lives in `gym.html` and `src/ui/main.jsx` for that reason. The worker
+registration is behind `import.meta.env.PROD`, because a worker registered
+against the dev server caches the dev server, and then the edit you just made
+is not the page you are looking at.
+
+`sw.js` names its cache (`bitbot-gym-v35`). Bump it whenever the shell
+changes, or a board that is offline keeps serving the gym it already has.
