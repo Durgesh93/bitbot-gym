@@ -6,10 +6,19 @@
    blocks exactly as they will in the lesson, then presses Transfer, which
    is the gym's version of dragging the .hex onto the board.
 
-   The protocol is two messages. The editor asks the host what projects it
-   has (`workspacesync`) and we hand it the one we want opened; it hands the
-   whole project back every time it saves (`workspacesave`), and we keep the
-   main.ts out of that.
+   The protocol is three messages, and the third is the one that matters.
+   The editor asks the host what projects it has (`workspacesync`) and we
+   hand it the one to open; it hands the whole project back every time it
+   saves (`workspacesave`), and we keep the main.ts out of that.
+
+   But it only saves when the child changes something. Pressing Transfer on
+   a project the editor has not happened to save yet would read an empty
+   string, and the board would sit there saying "nothing on this one yet" -
+   which is exactly the bug this had. So Transfer ASKS: it sends
+   `saveproject`, waits for the `workspacesave` that comes back, and
+   transfers that. Four seconds, then it gives up and says so out loud,
+   because a Transfer that quietly does nothing is the worst thing this
+   screen can do to a nine year old.
 
    The echo is the subtle part. A save can arrive a second after a program
    was started, so only pressing Transfer puts a card back to "ready".
@@ -17,6 +26,7 @@
    through, so it never comes back quite as it went in. */
 
 import React, { useEffect, useRef, useState } from "react";
+import { say } from "../core/log.js";
 
 const EDITOR_URL = "https://makecode.microbit.org/?controller=1&nocookiebanner=1";
 
@@ -54,6 +64,7 @@ export default function BlocksTab({ boards, chosen, onChoose, onTransfer, projec
   const [live, setLive] = useState(false);
   const [note, setNote] = useState("starting MakeCode - the first load takes a moment");
   const latest = useRef("");
+  const pending = useRef(null);        // a Transfer waiting for the editor to save
   const tidied = useRef(false);
   const msgId = useRef(0);
 
@@ -86,6 +97,8 @@ export default function BlocksTab({ boards, chosen, onChoose, onTransfer, projec
         const ts = (msg.project.text || {})["main.ts"];
         if (typeof ts === "string") latest.current = ts;
         setProject(chosen, msg.project);
+        /* somebody is waiting on this one */
+        if (pending.current) { const done = pending.current; pending.current = null; done(ts); }
         return;
       }
       if (msg.action === "workspacereset" || msg.action === "workspaceloaded") {
@@ -101,6 +114,25 @@ export default function BlocksTab({ boards, chosen, onChoose, onTransfer, projec
     if (live) send("importproject", { project: projects[chosen] || starterProject("micro:bit " + chosen) });
   }, [chosen]);                                     // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* Ask the editor for the blocks as they stand, then hand them over. */
+  async function transferNow() {
+    setNote("asking MakeCode for the blocks\u2026");
+    const ts = await new Promise(res => {
+      pending.current = res;
+      send("saveproject");
+      setTimeout(() => { if (pending.current === res) { pending.current = null; res(null); } }, 4000);
+    });
+    const code = (typeof ts === "string" && ts.trim()) ? ts : latest.current;
+    if (!code || !code.trim()) {
+      setNote("MakeCode sent nothing back - put a block in first, then press Transfer");
+      say("nothing came back from the editor - put a block under `on start`, " +
+          "then press Transfer again", "err");
+      return;
+    }
+    setNote("transferred to micro:bit " + chosen + " - press Play on its card");
+    onTransfer(chosen, code);
+  }
+
   return (
     <div className="blockstab">
       <div className="tools">
@@ -110,7 +142,7 @@ export default function BlocksTab({ boards, chosen, onChoose, onTransfer, projec
             {boards.map(b => <option key={b.id} value={b.id}>micro:bit {b.id}</option>)}
           </select>
         </label>
-        <button className="go" onClick={() => onTransfer(chosen, latest.current)}>
+        <button className="go" onClick={transferNow}>
           Transfer to micro:bit {chosen}
         </button>
         <span className="hint">{note}</span>

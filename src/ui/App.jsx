@@ -11,6 +11,7 @@
 
 import React, { useState, useCallback } from "react";
 import { useRoom } from "./useRoom.js";
+import { say } from "../core/log.js";
 import RoomView from "./RoomView.jsx";
 import Card from "./Card.jsx";
 import BlocksTab from "./BlocksTab.jsx";
@@ -45,7 +46,9 @@ export default function App() {
      code lands, the card goes back to "ready", and nothing starts until
      somebody presses Play. */
   const transfer = useCallback((id, src) => {
-    if (!src || !src.trim()) return;
+    /* Never silently. A Transfer that does nothing and says nothing is how
+       a child ends up pressing Play at a board with no program on it. */
+    if (!src || !src.trim()) { say("there was no code to transfer", "err"); return; }
     ask({ cmd: "load", id, code: src });
     setTab("room");
   }, [ask]);
