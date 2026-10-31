@@ -66,6 +66,8 @@ export default function App() {
             <div className="left">
               <RoomView snap={snap} post={post} ask={ask} />
               <div className="log">
+                {lines.length === 0 &&
+                  <div className="empty">the robots will say what they are doing here</div>}
                 {lines.slice(-60).map(l => (
                   <div key={l.k} className={l.cls}>
                     {l.device ? "[" + (l.device.name || l.device.id) + "] " : ""}{l.msg}

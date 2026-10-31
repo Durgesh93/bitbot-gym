@@ -1,153 +1,295 @@
-/* A workbench, not a toy: the room in the middle, the code on the left,
-   the instruments on the right, so you can watch a decision and its cause together. */
+/* A workbench, not a toy: the room on one side, the instruments on the
+   other, so you can watch a decision and its cause together.
+
+   Two rules this file keeps to.
+
+   NOTHING IS LOADED FROM ANYWHERE. No web fonts, no icon set, no CDN. The
+   gym has to open by double-clicking it on a school Chromebook with the
+   wifi off, so every font is one the machine already has and every mark on
+   the screen is drawn with CSS or inline SVG.
+
+   AND IT IS READ FROM THE BACK OF A CLASSROOM. Numbers are tabular, the lit
+   things glow, and the state of a robot is a colour before it is a word - a
+   teacher helping one child should be able to glance up and see which of
+   the other nine are stuck. */
+
 :root {
-  --bg: #11141c;
-  --panel: #1a1f2b;
-  --panel-2: #222938;
-  --line: #313a4e;
+  --bg: #0e1118;
+  --panel: #171c27;
+  --panel-2: #1f2634;
+  --sunk: #0a0d14;              /* a well: screens, tracks, the log */
+  --line: #2b3447;
+  --line-2: #3a4763;
   --fg: #eef2f8;
-  --muted: #9aa7bd;
+  --muted: #8d9bb4;
   --accent: #5bc0eb;
+  --mb: #a78bfa;                /* the board's colour */
+  --bb: #5bc0eb;                /* the chassis's colour */
   --go: #46c37b;
   --stop: #e8575a;
   --warn: #f2b134;
-  --led-on: #ff3b3b;
-  --led-off: #3a2a2a;
+  --led: #ff2e2e;
   --f-ui: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
   color-scheme: dark;
 }
-* , *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--fg); height: 100%; }
-/* the whole gym fits the window; each column scrolls on its own if it has to */
 body {
   font-family: var(--f-ui); font-size: 14px; line-height: 1.4; padding: 12px;
   display: flex; flex-direction: column; overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
-
-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-bottom: 10px; flex: none; }
-header h1 { margin: 0; font-size: 22px; letter-spacing: .01em; }
-header h1 span { color: var(--accent); }
-header .tag { color: var(--muted); font-size: 12.5px; max-width: 46ch; }
 .spacer { flex: 1; }
 
 button, select, input[type=number] {
-  font: inherit; font-size: 13px; color: var(--fg); background: var(--panel-2);
-  border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px; cursor: pointer;
+  font: inherit; font-size: 12.5px; color: var(--fg); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 9px; padding: 6px 12px; cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
 }
-button:hover { border-color: #4a586f; }
-button.go { background: var(--go); border-color: var(--go); color: #06281a; font-weight: 700; }
-button.stop { background: var(--stop); border-color: var(--stop); color: #2b0708; font-weight: 700; }
+button:hover { border-color: var(--line-2); background: #273045; }
+button.go { background: #15382a; border-color: #2f7d55; color: #96efbe; font-weight: 600; }
+button.go:hover { background: #1b4836; border-color: var(--go); }
 button.on { background: var(--accent); border-color: var(--accent); color: #062430; font-weight: 700; }
-button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-label.inline { color: var(--muted); font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
-
-/* Everything the old single-file gym styled - .layout, .panel, #wire, the
-   instrument column - went with it. Two of those rules were still reaching
-   into the new UI and shrinking the room to 38vh, which is how a 620px
-   canvas came out 342px wide. */
+button.quiet { color: var(--muted); }
+button.quiet:hover { color: #ffc9cb; border-color: #70383d; background: #2a1b1f; }
+button:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+label.inline { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+.hint { color: var(--muted); font-size: 12px; margin: 0; }
 
 /* ===========================================================================
-   The gym proper: a header, then one of three tabs. The room tab is the
-   room and the log on the left, a wall of cards on the right - the layout
-   the class already knows.
+   Frame: a header, then one of three tabs.
    =========================================================================== */
 
 #app { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .gym { display: flex; flex-direction: column; height: 100%; min-height: 0; flex: 1 1 auto; }
 
 .gym > header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px;
-                margin-bottom: 10px; flex: none; }
-.gym > header .title { font-weight: 700; font-size: 17px; }
+                margin-bottom: 12px; flex: none; }
+.gym > header .title { font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
 .gym > header .title span { color: var(--accent); }
-.gym > header .spacer { flex: 1; }
 .gym > header .clock { font-family: var(--f-mono); color: var(--muted); font-size: 13px;
-                       font-variant-numeric: tabular-nums; }
-.gym > header nav { display: flex; gap: 4px; }
-.gym > header nav button { text-transform: capitalize; }
+                       font-variant-numeric: tabular-nums; min-width: 6ch; text-align: right; }
+
+/* the tabs, as one segmented control rather than three loose buttons */
+.gym > header nav { display: flex; gap: 2px; background: var(--panel);
+                    border: 1px solid var(--line); border-radius: 11px; padding: 3px; }
+.gym > header nav button { text-transform: capitalize; border: none; background: transparent;
+                           border-radius: 8px; padding: 5px 14px; color: var(--muted); }
+.gym > header nav button:hover { background: var(--panel-2); color: var(--fg); }
+.gym > header nav button.on { background: var(--accent); color: #062430; font-weight: 700; }
 
 main { flex: 1 1 auto; min-height: 0; }
 main.tab-room { display: grid; gap: 12px; grid-template-columns: minmax(0, 54fr) minmax(0, 46fr); }
 main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px; }
 
-.left { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
-.roomview { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1 1 auto; }
-.roomview canvas { width: auto; height: auto; max-width: 100%; max-height: 100%;
-                   border-radius: 10px; background: #0d1017; display: block; margin: 0 auto;
-                   touch-action: none; cursor: grab; }
-.tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: none; }
-.tools .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 3px; }
+/* ---- the room ------------------------------------------------------- */
 
-.log { flex: 0 0 110px; overflow: auto; background: #0d1017; border: 1px solid var(--line);
-       border-radius: 7px; padding: 5px 8px; font-family: var(--f-mono); font-size: 11px;
-       line-height: 1.5; color: #c6d2e4; }
+.left { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.roomview { display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1 1 auto; }
+.roomview canvas { width: auto; height: auto; max-width: 100%; max-height: 100%;
+                   border-radius: 12px; background: var(--sunk); display: block; margin: 0 auto;
+                   touch-action: none; cursor: grab;
+                   box-shadow: 0 10px 34px rgba(0,0,0,.45), 0 0 0 1px var(--line); }
+.roomview canvas:active { cursor: grabbing; }
+.tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: none; }
+.tools .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+
+.log { flex: 0 0 116px; overflow: auto; background: var(--sunk);
+       border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px;
+       font-family: var(--f-mono); font-size: 11px; line-height: 1.6; color: #b9c6db; }
 .log div { white-space: pre-wrap; }
 .log div.err { color: #ff9a9a; }
-.log div.say { color: var(--warn); }
+.log div.empty { color: #55607a; font-style: italic; }
+.log div.say { color: #e3c377; }
 
-/* ---- the cards ---- */
-.cards { overflow: auto; align-content: start; display: grid; gap: 10px;
-         grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-        padding: 10px 12px; }
-/* a card brightens and takes a green edge while its program runs */
-.card.live { background: #313d52; border-color: var(--go); box-shadow: inset 3px 0 0 var(--go); }
-.card.live .top b { color: #d6ffe6; }
-.card.live .ctime { color: #9ff0c0; }
-/* and goes dark with a red edge once Stop has been pressed */
-.card.off { background: #20222b; border-color: #70383d; box-shadow: inset 3px 0 0 var(--stop); }
-.card.off .top b { color: #eec2c4; }
-.card.off .ctime { color: #ffb4b7; }
-.card.off .scr, .card.off table { opacity: .62; }
+/* ===========================================================================
+   The cards. One per board, and the card is where a child works.
+   =========================================================================== */
 
-.card .top { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
-.card .top b { font-size: 15px; }
-.card .where { margin-left: auto; font-size: 11px; color: var(--muted); }
-.card .ctime { font-family: var(--f-mono); font-size: 11px; color: var(--muted);
+.cards { overflow: auto; align-content: start; display: grid; gap: 12px;
+         grid-template-columns: repeat(auto-fill, minmax(315px, 1fr)); padding-right: 2px; }
+.cards .hint { grid-column: 1 / -1; border: 1px dashed var(--line); border-radius: 12px;
+               padding: 26px; text-align: center; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+        padding: 12px 13px 11px; transition: background .15s, border-color .15s, box-shadow .15s; }
+/* the state of a robot is a colour before it is a word */
+.card.live { background: #16281f; border-color: #2f7d55; box-shadow: inset 3px 0 0 var(--go); }
+.card.hold { box-shadow: inset 3px 0 0 var(--accent); }
+.card.off  { background: #1b1519; border-color: #70383d; box-shadow: inset 3px 0 0 var(--stop); }
+.card.off .scr, .card.off .gauges { opacity: .5; }
+
+.card .top { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.card .top b { font-size: 15.5px; letter-spacing: -.01em; }
+.card .ctime { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted);
                font-variant-numeric: tabular-nums; }
-.st { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700;
-      border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px; color: var(--muted); }
-.st[data-st="run"] { color: #9ff0c0; border-color: var(--go); }
-.st[data-st="stop"] { color: #ffb4b7; border-color: var(--stop); }
-.st[data-st="wait"] { color: #bfe3f5; border-color: rgba(91,192,235,0.5); }
+.card.live .ctime { color: #96efbe; }
 
-/* two halves: what the board feels, then what the robot feels */
-.sect { display: flex; align-items: center; gap: 7px; margin: 10px 0 5px;
-        font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
-        color: var(--muted); font-weight: 700; }
-.sect:after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.sect.bot { color: var(--accent); }
-.sect.bot:after { background: rgba(91,192,235,0.3); }
+.st { font-size: 9px; letter-spacing: .09em; text-transform: uppercase; font-weight: 800;
+      border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; color: var(--muted); }
+.st[data-st="run"]  { color: #96efbe; border-color: #2f7d55; background: #11291e; }
+.st[data-st="stop"] { color: #ffb4b7; border-color: #70383d; background: #2a1b1f; }
+.st[data-st="wait"] { color: #bfe3f5; border-color: #2d5e76; background: #10222c; }
+.st[data-st="end"]  { color: #d8c6ff; border-color: #4a3d78; background: #1b1830; }
 
-.card .body { display: flex; gap: 10px; }
-.scr { display: grid; grid-template-columns: repeat(5, 10px); gap: 3px; background: #08080c;
-       padding: 7px; border-radius: 7px; height: max-content; }
-.scr span { width: 10px; height: 10px; border-radius: 2px; background: var(--led-off); display: block; }
-.scr span.on { background: var(--led-on); box-shadow: 0 0 5px var(--led-on); }
+.card .run, .card .press { display: flex; gap: 5px; }
+.card .press { margin-top: 9px; }
+.card .press.last { margin-top: 11px; }
+.card .run button, .card .press button { flex: 1; padding: 6px 2px; font-size: 11.5px; }
+/* a held button stays held, and that is `reads` coming back round from the
+   board - not a useState pretending */
+.card .press button.down { background: var(--accent); border-color: var(--accent);
+                           color: #062430; font-weight: 700; }
 
-.card table { border-collapse: collapse; width: 100%; font-size: 11.5px; }
-.card td { padding: 1px 0; }
-.card td.k { color: var(--muted); padding-right: 6px; white-space: nowrap; }
-.card td.v { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums;
-             white-space: pre; }
+/* two halves, with a rule between them */
+.sect { display: flex; align-items: center; gap: 8px; margin: 13px 0 8px;
+        font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; font-weight: 800; }
+.sect:after { content: ""; flex: 1; height: 1px; }
+.sect.mb { color: var(--mb); }
+.sect.mb:after { background: linear-gradient(90deg, #4a3d78, transparent); }
+.sect.bb { color: var(--bb); }
+.sect.bb:after { background: linear-gradient(90deg, #2d5e76, transparent); }
 
-.arms { display: flex; gap: 14px; margin-top: 8px; }
-.arms > div { display: flex; align-items: center; gap: 4px; }
-.arms b { font-size: 10px; color: var(--muted); font-weight: 600; }
-.arms i { width: 9px; height: 9px; border-radius: 50%; background: #2a2f3c; display: block; }
+.mbrow { display: flex; gap: 13px; align-items: flex-start; }
+.gauges { display: grid; gap: 7px; flex: 1; min-width: 0; align-content: start; }
+.gauges.wide { margin-top: 2px; }
+.inhand { color: var(--muted); font-size: 11.5px; margin: 11px 0 0;
+          border: 1px dashed var(--line); border-radius: 10px; padding: 9px 11px; }
+.inhand code { font-family: var(--f-mono); font-size: 11px; color: var(--bb); }
 
-.card .run, .card .press { display: flex; gap: 4px; margin-top: 8px; }
-.card .run button, .card .press button { flex: 1; padding: 4px 2px; font-size: 11px; }
-button.go { background: #1d3a2a; border-color: var(--go); color: #9ff0c0; }
+/* ---- the screen ------------------------------------------------------ */
 
-/* ---- the two code tabs ---- */
-.blockstab, .codetab { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1 1 auto; }
+.scr { display: grid; grid-template-columns: repeat(5, 13px); gap: 3.5px; background: #07080c;
+       padding: 9px; border-radius: 9px; height: max-content; flex: none;
+       border: 1px solid #1d222e; box-shadow: inset 0 1px 7px rgba(0,0,0,.8); }
+.scr span { width: 13px; height: 13px; border-radius: 2.5px; display: block;
+            background: #2a1313; }
+.scr span.on { background: var(--led); }
+.scr.dim { filter: saturate(.4) brightness(.7); }
+
+/* ---- a row: label, something to look at, the number ------------------ */
+
+.meter, .sonar, .line, .dial {
+  display: grid; grid-template-columns: 42px minmax(0, 1fr) 54px;
+  align-items: center; gap: 9px;
+}
+.lab { color: var(--muted); font-size: 9px; font-weight: 800;
+       letter-spacing: .09em; text-transform: uppercase; }
+.num { text-align: right; font-family: var(--f-mono); font-size: 12px;
+       font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* The bars ease; the numbers never do. A value that jitters by one unit
+   strobes at 60 fps and a child watching for "is it getting brighter?"
+   cannot see the trend through the flicker - but the number is what the
+   block returns, so it has to be honest to the millisecond. */
+.track { height: 8px; border-radius: 5px; background: var(--sunk);
+         border: 1px solid var(--line); overflow: hidden; display: block; }
+.track i { display: block; height: 100%; border-radius: 4px; background: var(--accent);
+           transition: width .09s linear; }
+.track i.t-warm { background: linear-gradient(90deg, #8a6a2a, var(--warn)); }
+.track i.t-cool { background: linear-gradient(90deg, #2d5e76, var(--bb)); }
+
+/* ---- the two light eyes, as a balance -------------------------------- */
+
+.eyes { display: grid; grid-template-columns: 42px 34px minmax(0, 1fr) 34px;
+        align-items: center; gap: 7px; }
+.eyes .num { font-size: 11.5px; }
+.eyes .num.l { text-align: left; }
+.bal { display: flex; align-items: center; }
+.half { flex: 1; height: 10px; background: var(--sunk); border: 1px solid var(--line);
+        display: flex; overflow: hidden; }
+.half.lh { border-radius: 6px 0 0 6px; justify-content: flex-end; border-right: none; }
+.half.rh { border-radius: 0 6px 6px 0; justify-content: flex-start; border-left: none; }
+.half i { height: 100%; background: #46829f; transition: width .09s linear; }
+/* whichever eye is winning goes gold, because "turn towards the brighter
+   one" is every light-chasing program in the course */
+.half i.lead { background: linear-gradient(90deg, #8a6a2a, var(--warn)); }
+.bal .pin { width: 2px; height: 15px; background: var(--line-2); flex: none; border-radius: 1px; }
+
+/* ---- the sonar ------------------------------------------------------- */
+
+.beam { position: relative; height: 10px; border-radius: 6px; background: var(--sunk);
+        border: 1px solid var(--line); display: block; }
+.beam .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px 0 0 5px;
+              background: linear-gradient(90deg, #1f4255, #2d5e76); transition: width .09s linear; }
+.beam .wall { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px;
+              border-radius: 2px; background: var(--bb); transition: left .09s linear; }
+.sonar .num { font-size: 11.5px; }
+.sonar.amber .beam .wall { background: var(--warn); }
+.sonar.amber .num { color: var(--warn); }
+.sonar.red .beam .wall { background: var(--stop); box-shadow: 0 0 8px var(--stop); }
+.sonar.red .num { color: #ff9a9a; font-weight: 700; }
+
+/* ---- the line sensors ------------------------------------------------ */
+
+.pads { display: flex; gap: 8px; }
+.pads i { width: 14px; height: 14px; border-radius: 50%; background: var(--sunk);
+          border: 1px solid var(--line); display: block; transition: background .09s, box-shadow .09s; }
+.pads i.dark { background: var(--warn); border-color: var(--warn);
+               box-shadow: 0 0 8px rgba(242,177,52,.65); }
+.line .num { font-size: 11px; color: var(--muted); }
+
+/* ---- the compass tape ------------------------------------------------ */
+
+.tape { position: relative; display: block; height: 20px; overflow: hidden;
+        background: var(--sunk); border: 1px solid var(--line); border-radius: 6px;
+        /* the fade is what hides a mark wrapping from one edge to the other */
+        -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+        mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent); }
+.tape b { position: absolute; top: 50%; transform: translate(-50%, -50%);
+          font-size: 9.5px; font-weight: 800; letter-spacing: .06em; color: #c3d0e4; }
+.tape b.minor { font-size: 8px; font-weight: 600; color: var(--muted); }
+.tape .here { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
+              margin-left: -.5px; background: var(--stop); opacity: .85; }
+.tape .here:after { content: ""; position: absolute; left: -3px; top: 0;
+                    border-left: 3.5px solid transparent; border-right: 3.5px solid transparent;
+                    border-top: 4px solid var(--stop); }
+
+/* ---- the FireLeds ---------------------------------------------------- */
+
+.pix { display: flex; align-items: center; gap: 9px; }
+.pix .lab { width: 42px; flex: none; }
+.pix .arm { display: inline-flex; gap: 3.5px; }
+.pix .gap { width: 11px; }
+.pix i { width: 10px; height: 10px; border-radius: 50%; background: #10141d;
+         border: 1px solid var(--line); display: block; transition: background .09s, box-shadow .09s; }
+
+/* ===========================================================================
+   The two code tabs.
+   =========================================================================== */
+
+.blockstab, .codetab { display: flex; flex-direction: column; gap: 9px; min-height: 0; flex: 1 1 auto; }
 .blockstab iframe { flex: 1 1 auto; width: 100%; border: 1px solid var(--line);
-                    border-radius: 10px; background: #fff; min-height: 0; }
+                    border-radius: 12px; background: #fff; min-height: 0; }
 .codetab textarea { flex: 1 1 auto; width: 100%; min-height: 0; resize: none;
-                    background: #0d1017; color: #c6d2e4; border: 1px solid var(--line);
-                    border-radius: 10px; padding: 10px 12px;
-                    font-family: var(--f-mono); font-size: 13px; line-height: 1.55; }
+                    background: var(--sunk); color: #c6d2e4; border: 1px solid var(--line);
+                    border-radius: 12px; padding: 12px 14px;
+                    font-family: var(--f-mono); font-size: 13px; line-height: 1.6; }
 
-.hint { color: var(--muted); font-size: 12px; margin: 0; }
-label.inline { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+/* ===========================================================================
+   Narrow: the room goes above the cards rather than beside them, which is
+   what a Chromebook in portrait and a projector at 1024 both want.
+
+   The whole full-height model has to come off for this, not just the grid.
+   Everything above is built on "the window is the height and each column
+   scrolls inside it"; stacked, that is the wrong shape - there is more
+   than a window's worth of gym, so the PAGE should scroll, the way a page
+   does. Half-undoing it is what put the log on top of the room.
+   =========================================================================== */
+
+@media (max-width: 1080px) {
+  html, body { height: auto; }
+  body { overflow: auto; display: block; }
+  #app, .gym, main { height: auto; min-height: 0; display: block; }
+  .gym > header { display: flex; }
+  main.tab-room, .left, .roomview { display: block; }
+  .roomview canvas { max-height: 62vh; margin: 0 auto 10px; }
+  .tools { display: flex; margin-bottom: 10px; }
+  .log { height: 96px; margin-bottom: 12px; }
+  .cards { overflow: visible; }
+  .blockstab, .codetab { display: block; }
+  .blockstab iframe, .codetab textarea { height: 74vh; }
+}

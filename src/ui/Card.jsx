@@ -2,54 +2,28 @@
 
    Everything on it comes out of `body`, which is one entry of the snapshot.
    The card holds no state of its own - not the screen, not the sensor
-   numbers, not whether the program is running. It cannot drift, because
-   there is nothing of its own to drift from.
+   numbers, not whether the program is running, not even whether a button is
+   held down. It cannot drift, because there is nothing of its own to drift
+   from.
 
    Two halves, with a rule between them: on top what the micro:bit feels,
    underneath what the robot feels. A child learning that the board is the
-   brain and the chassis is the body can see it in the card. */
+   brain and the chassis is the body can see it in the card.
+
+   Watch the A button to see the whole gym in miniature. Pressing it posts a
+   message; the board takes it on the next drain; the board's read() puts it
+   in `reads`; the snapshot carries it here; the button lights up. It would
+   have been one line to light the button from a React useState, and that
+   line is exactly the lie this rebuild exists to stop telling. */
 
 import React from "react";
-
-const STATE_WORD = {
-  ready: "ready", run: "running", wait: "waiting", end: "finished", stop: "stopped"
-};
-
-function Screen({ cells }) {
-  return (
-    <div className="scr" aria-label="the micro:bit screen">
-      {(cells || new Array(25).fill(0)).map((v, i) => (
-        <span key={i} className={v > 0 ? "on" : ""}
-              style={v > 0 ? { opacity: 0.35 + 0.65 * (v / 255) } : undefined} />
-      ))}
-    </div>
-  );
-}
-
-function Arm({ pixels, from, to, label }) {
-  return (
-    <div>
-      <b>{label}</b>
-      {pixels.slice(from, to).map((c, i) => (
-        <i key={i} style={c ? { background: c, boxShadow: "0 0 5px " + c } : undefined} />
-      ))}
-    </div>
-  );
-}
-
-function Row({ k, v }) {
-  return <tr><td className="k">{k}</td><td className="v">{v}</td></tr>;
-}
-
-/* Three digits wide, always, so a column of numbers does not jump about
-   while a robot drives. */
-const n3 = v => String(v == null ? 0 : v).padStart(3, " ");
+import { Screen, Meter, Eyes, Sonar, Line, Compass, Pixels, Pill } from "./parts.jsx";
 
 export default function Card({ body, post }) {
   const p = body.program || {};
   const r = body.reads || {};
   const state = p.state || "ready";
-  const cls = state === "run" ? "live" : state === "stop" ? "off" : "";
+  const cls = state === "run" ? "live" : state === "stop" ? "off" : state === "wait" ? "hold" : "";
 
   const send = msg => post({ ...msg, id: body.id });
   const hold = (button) => ({
@@ -62,9 +36,9 @@ export default function Card({ body, post }) {
     <div className={"card " + cls}>
       <div className="top">
         <b>micro:bit {body.id}</b>
-        <span className="st" data-st={state}>{STATE_WORD[state]}</span>
+        <Pill state={state} />
+        <span className="spacer" />
         <span className="ctime">{((p.stopwatch || 0) / 1000).toFixed(1)}s</span>
-        <span className="where">{p.plugged ? "Bit:Bot " + (p.model || "XL") : "in hand"}</span>
       </div>
 
       <div className="run">
@@ -73,48 +47,42 @@ export default function Card({ body, post }) {
         <button onClick={() => send({ cmd: "reset" })}>Reset</button>
       </div>
 
-      <div className="sect">micro:bit</div>
-      <div className="body">
-        <Screen cells={body.screen} />
-        <table>
-          <tbody>
-            <Row k="light" v={n3(r.light)} />
-            <Row k="sound" v={n3(r.sound)} />
-            <Row k="compass" v={n3(r.compass) + "°"} />
-            <Row k="waiting on" v={p.armed ? p.armed + " handler(s)" : "-"} />
-          </tbody>
-        </table>
+      <div className="sect mb">micro:bit</div>
+      <div className="mbrow">
+        <Screen cells={body.screen} dim={state === "stop"} />
+        <div className="gauges">
+          <Meter label="light" value={r.light} max={255} tone="warm" />
+          <Meter label="sound" value={r.sound} max={255} tone="cool" />
+          <Compass heading={r.compass} />
+        </div>
       </div>
 
       <div className="press">
-        <button {...hold("A")}>A</button>
-        <button {...hold("B")}>B</button>
-        <button {...hold("logo")}>logo</button>
+        <button className={r.buttonA ? "down" : ""} {...hold("A")}>A</button>
+        <button className={r.buttonB ? "down" : ""} {...hold("B")}>B</button>
+        <button className={r.logo ? "down" : ""} {...hold("logo")}>logo</button>
         <button onClick={() => send({ cmd: "gesture", name: "shake" })}>shake</button>
       </div>
 
-      {p.plugged && (
+      {p.plugged ? (
         <>
-          <div className="sect bot">Bit:Bot</div>
-          <table>
-            <tbody>
-              <Row k="eye L / R" v={n3(r.lightL) + " / " + n3(r.lightR)} />
-              <Row k="line L / R" v={r.lineL + " / " + r.lineR} />
-              <Row k="sonar" v={r.sonar ? r.sonar + " cm" : "nothing in range"} />
-            </tbody>
-          </table>
-          <div className="arms">
-            <Arm pixels={p.pixels || []} from={0} to={6} label="L" />
-            <Arm pixels={p.pixels || []} from={6} to={12} label="R" />
+          <div className="sect bb">Bit:Bot {p.model || "XL"}</div>
+          <div className="gauges wide">
+            <Eyes left={r.lightL} right={r.lightR} />
+            <Sonar cm={r.sonar} />
+            <Line left={r.lineL} right={r.lineR} />
+            <Pixels pixels={p.pixels} />
           </div>
         </>
+      ) : (
+        <p className="inhand">in hand - the <code>bitbot</code> blocks will say so politely</p>
       )}
 
-      <div className="press">
+      <div className="press last">
         <button onClick={() => send({ cmd: "plug", on: !p.plugged })}>
           {p.plugged ? "take off the Bit:Bot" : "put it on a Bit:Bot"}
         </button>
-        <button onClick={() => send({ cmd: "remove" })}>remove</button>
+        <button className="quiet" onClick={() => send({ cmd: "remove" })}>remove</button>
       </div>
     </div>
   );
