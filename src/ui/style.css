@@ -152,7 +152,11 @@
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--fg); height: 100%; }
 body {
-  font-family: var(--f-ui); font-size: 14px; line-height: 1.4; padding: 12px;
+  /* A gutter down each side for the page turners. They are fixed to the
+     window, so without it they sit on top of whichever button happens to
+     be at the edge - and the button they covered here was "Drag things",
+     the one a child reaches for most. */
+  font-family: var(--f-ui); font-size: 14px; line-height: 1.4; padding: 12px 46px;
   display: flex; flex-direction: column; overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
@@ -558,6 +562,7 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 
 @media (max-width: 1080px) {
   html, body { height: auto; }
+  body { padding: 12px 44px; }
   body { overflow: auto; display: block; }
   #app, .gym, main { height: auto; min-height: 0; display: block; }
   .gym > header { display: flex; }

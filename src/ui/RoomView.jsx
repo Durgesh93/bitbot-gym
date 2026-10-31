@@ -26,14 +26,15 @@ const TOOLS = [
   ["erase", "Erase line",    "click or drag over tape to rub it out"]
 ];
 
+/* Three toggles, not four choices: any of them can be on at once, because
+   a robot is reading all three at once anyway. "Plain" is all of them off. */
 const VIEWS = [
-  ["plain",    "Plain",         "just the room"],
-  ["light",    "Light sensors", "how bright the floor is to a robot's eyes"],
-  ["magnetic", "Magnetic",      "which way the compass points, everywhere"],
-  ["sonar",    "Sonar",         "what the front sensor can see from each robot"]
+  ["light",    "Light sensors", "a blob at each eye, bigger the more light it gets"],
+  ["magnetic", "Magnetic",      "the Earth's field - the same everywhere, which is the point"],
+  ["sonar",    "Sonar",         "the real pings, with a dot where each one hit"]
 ];
 
-export default function RoomView({ snap, post, ask, lightMap }) {
+export default function RoomView({ snap, post, ask }) {
   const canvasRef = useRef(null);
   const rendererRef = useRef(null);
   const dragRef = useRef(null);
@@ -41,7 +42,8 @@ export default function RoomView({ snap, post, ask, lightMap }) {
 
   const [tool, setTool] = useState("move");
   const [thing, setThing] = useState("chair");
-  const [view, setView] = useState("plain");
+  const [show, setShow] = useState({ light: false, magnetic: false, sonar: false });
+  const anyView = show.light || show.magnetic || show.sonar;
   const [trail, setTrail] = useState(true);
   const [catalogue, setCatalogue] = useState([]);
 
@@ -50,17 +52,23 @@ export default function RoomView({ snap, post, ask, lightMap }) {
       /* The renderer is handed the room's own light map rather than working
          one out: the "Light sensors" view has to be the same numbers the
          sensors read, or it teaches the wrong thing confidently. */
-      rendererRef.current = createRoomRenderer(canvasRef.current, lightMap);
+      /* The renderer is handed the room's own raycast rather than one of
+         its own: the sonar view has to be the same question the sonar
+         asked, or it is a drawing that cannot ever disagree with itself
+         and therefore cannot ever show you a bug. */
+      rendererRef.current = createRoomRenderer(canvasRef.current, {
+        ray: (from, angle, opts) => ask({ cmd: "ray", from, angle, opts })
+      });
     }
     setCatalogue(ask({ cmd: "catalogue" }) || []);
-  }, [ask, lightMap]);
+  }, [ask]);
 
   useEffect(() => {
     if (rendererRef.current && snap) {
-      try { rendererRef.current.draw(snap, { trail, view, pen: penRef.current }); }
+      try { rendererRef.current.draw(snap, { trail, show, pen: penRef.current }); }
       catch (e) { console.error(e); }
     }
-  }, [snap, trail, view]);
+  }, [snap, trail, show]);
 
   const toRoom = (e) => {
     const r = canvasRef.current.getBoundingClientRect();
@@ -164,9 +172,13 @@ export default function RoomView({ snap, post, ask, lightMap }) {
       </div>
 
       <div className="tools">
+        <button className={anyView ? "" : "on"} title="just the room"
+                onClick={() => setShow({ light: false, magnetic: false, sonar: false })}>
+          Plain
+        </button>
         {VIEWS.map(([id, label, why]) => (
-          <button key={id} className={view === id ? "on" : ""} title={why}
-                  onClick={() => setView(id)}>{label}</button>
+          <button key={id} className={show[id] ? "on" : ""} title={why}
+                  onClick={() => setShow(v => ({ ...v, [id]: !v[id] }))}>{label}</button>
         ))}
 
         <span className="sep" />

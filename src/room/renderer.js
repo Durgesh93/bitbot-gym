@@ -327,141 +327,171 @@ function drawRadio(snap) {
 
 /* THE SENSOR VIEWS.
 
-   The room as a sensor reads it, rather than as an eye sees it. This is the
-   single most useful thing the old gym did for teaching, and the reason is
-   that every hard question a child asks is about a quantity they cannot
-   see: "why does it turn left here?", "why does it stop in the middle of
-   nothing?", "why does my compass say east?". Drawing the field answers
-   those without anyone having to believe a number.
+   The room as a sensor reads it, rather than as an eye sees it. This is
+   the most useful thing the gym does for teaching, because every hard
+   question a child asks is about a quantity they cannot see: "why does it
+   turn left here?", "why does it stop in front of nothing?", "why does my
+   compass say east?".
 
-   Each one draws from the SAME data the sensors were given, never from a
-   second guess at it, so the picture and the readings cannot disagree. The
-   whole point would be lost if they could. */
+   THEY COMBINE. Light, magnetic and sonar are three toggles and any of
+   them can be on at once, because a robot is reading all three at once
+   anyway; "Plain" is simply all of them off. Making them exclusive, as a
+   row of radio buttons, quietly says they are alternatives, and they are
+   not.
 
-const MAG_LABEL = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+   Each one draws from THE SAME QUESTION THE SENSOR ASKED. The sonar view
+   in particular casts real rays - it does not draw a cone from the number
+   the sonar already returned. Drawing the answer instead of the question
+   makes a picture that always agrees with itself and can therefore never
+   show you the thing you are hunting: a ray that slipped past a chair leg,
+   or a cone that is pointing somewhere other than you thought. */
 
-function drawOverlay(snap, view, W, lightMapFor) {
-  ctx.save();
+const SONAR_RAYS = 3;          // this many either side of straight ahead
+const SONAR_STEP = 0.044;      // radians between them: a 15-degree cone in all
+const SONAR_FWD = 62;          // where the sonar sits, forward of the middle
 
-  if (view === "light") {
-    /* A heat map of what the floor is worth to an eye looking up - the
-       same square of samples the room already works out for the picture,
-       so it costs nothing extra and cannot drift from it. */
-    const n = 48;
-    const map = lightMapFor ? lightMapFor(n) : null;
-    if (map) {
-      /* STRETCHED BETWEEN THIS ROOM'S OWN DARKEST AND BRIGHTEST, not between
-         zero and the brightest. A lit classroom floor sits in a narrow band
-         - the darkest corner is a good fraction of the brightest spot - so
-         measuring from zero paints the whole room one pale colour and the
-         shadow a child is being shown disappears into it. The question this
-         view answers is "where is it brighter THAN HERE", so that is the
-         question the scale has to be built for. */
-      let lo = Infinity, hi = 0;
-      for (let i = 0; i < map.length; i++) {
-        if (map[i] < lo) lo = map[i];
-        if (map[i] > hi) hi = map[i];
-      }
-      const span = (hi - lo) || 1;
-      const cell = W / n;
-      /* five stops, dark to bright, far enough apart to survive a projector
-         and to still read as an order in greyscale */
-      const RAMP = [[16, 24, 64], [28, 74, 150], [26, 160, 158],
-                    [238, 176, 50], [255, 248, 222]];
-      ctx.globalAlpha = 0.78;
-      for (let j = 0; j < n; j++) {
-        for (let i = 0; i < n; i++) {
-          /* sqrt, because the eye judges brightness that way and the
-             shadows are the part worth resolving */
-          const v = Math.sqrt(clamp((map[j * n + i] - lo) / span, 0, 1));
-          const t = v * (RAMP.length - 1);
-          const k = Math.min(RAMP.length - 2, Math.floor(t)), f = t - k;
-          const a = RAMP[k], b = RAMP[k + 1];
-          ctx.fillStyle = "rgb(" + Math.round(a[0] + (b[0] - a[0]) * f) + ","
-                                 + Math.round(a[1] + (b[1] - a[1]) * f) + ","
-                                 + Math.round(a[2] + (b[2] - a[2]) * f) + ")";
-          ctx.fillRect(i * cell, j * cell, cell + 1, cell + 1);
-        }
-      }
-      ctx.globalAlpha = 1;
-    }
+function bubble(text, x, y, colour, W) {
+  const f = Math.round(11 * (W / 620));
+  ctx.font = "600 " + f + "px system-ui, sans-serif";
+  const w = ctx.measureText(text).width + f * 1.1, h = f * 1.9;
+  ctx.fillStyle = "rgba(10,13,20,0.82)";
+  roundRect(x - w / 2, y, w, h, h * 0.36);
+  ctx.fill();
+  ctx.fillStyle = colour;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, x, y + h / 2);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
 
-  } else if (view === "magnetic") {
-    /* One needle per square of floor. They all point the same way, which
-       IS the lesson: the Earth's field does not care where you stand, so a
-       compass block gives the same heading anywhere in the room, and a
-       robot that reads differently has turned, not moved. */
-    const step = W / 9;
-    ctx.globalAlpha = 0.85;
-    for (let y = step / 2; y < W; y += step) {
-      for (let x = step / 2; x < W; x += step) {
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(MAG_NORTH + Math.PI / 2);
-        const r = step * 0.3;
-        ctx.beginPath();                               // the red half, pointing north
-        ctx.moveTo(0, -r); ctx.lineTo(r * 0.3, 0); ctx.lineTo(-r * 0.3, 0);
-        ctx.closePath();
-        ctx.fillStyle = "rgba(232,70,74,0.95)"; ctx.fill();
-        ctx.beginPath();                               // and the white tail
-        ctx.moveTo(0, r); ctx.lineTo(r * 0.3, 0); ctx.lineTo(-r * 0.3, 0);
-        ctx.closePath();
-        ctx.fillStyle = "rgba(245,247,252,0.9)"; ctx.fill();
-        ctx.restore();
-      }
-    }
-    ctx.globalAlpha = 1;
+/* Every line a view wants to say about a robot is collected first and the
+   lines are stacked underneath it, so three views at once read as three
+   rows rather than three captions on top of each other. */
+function drawOverlay(snap, show, W, probe) {
+  if (!show.light && !show.magnetic && !show.sonar) return;
+  const said = new Map();
+  const add = (b, text, colour) => {
+    if (!said.has(b)) said.set(b, []);
+    said.get(b).push({ text: text, colour: colour });
+  };
 
-  } else if (view === "sonar") {
-    /* The cone each robot's front sensor is actually looking down, and how
-       far it is reading. A child who can see the cone stops being surprised
-       that a chair beside the robot is invisible to it. */
+  if (show.light) {
+    /* A blob at each eye, bigger and hotter the more light it is getting.
+       At the eye, because that is where the reading is taken - a child who
+       sees the left blob swell as the robot turns has understood the whole
+       of a light-chasing program. */
     for (const b of snap.bodies) {
-      const cm = b.reads && b.reads.sonar;
-      const reach = (cm == null || cm <= 0 ? 2000 : cm * 10);
-      const half = 0.26;                               // about 15 degrees each side
-      ctx.save();
-      ctx.translate(b.x * S, b.y * S);
-      ctx.rotate(b.h || 0);
-      const g = ctx.createRadialGradient(0, 0, b.r * S, 0, 0, reach * S);
-      g.addColorStop(0, "rgba(39,207,209,0.42)");
-      g.addColorStop(1, "rgba(39,207,209,0.03)");
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.arc(0, 0, reach * S, -half, half);
-      ctx.closePath();
-      ctx.fillStyle = g; ctx.fill();
-      ctx.strokeStyle = "rgba(39,207,209,0.8)"; ctx.lineWidth = 1.5;
-      ctx.stroke();
-      if (cm != null && cm > 0) {                      // the wall it found
+      const r = b.reads || {};
+      if (r.lightL == null) continue;
+      const c = Math.cos(b.h || 0), sn = Math.sin(b.h || 0);
+      const eye = (side) => ({
+        x: b.x + c * 55 - sn * side,
+        y: b.y + sn * 55 + c * side
+      });
+      for (const [p, v] of [[eye(-34), r.lightL], [eye(34), r.lightR]]) {
+        const t = clamp(v / 1023, 0, 1);
         ctx.beginPath();
-        ctx.arc(0, 0, reach * S, -half, half);
-        ctx.strokeStyle = cm < 15 ? "rgba(255,95,109,0.95)" : "rgba(39,207,209,0.95)";
-        ctx.lineWidth = 3; ctx.stroke();
+        ctx.arc(p.x * S, p.y * S, (7 + 9 * t) * S, 0, 7);
+        ctx.fillStyle = "rgba(255," + Math.round(200 + 55 * t) + ","
+                      + Math.round(80 + 120 * t) + "," + (0.25 + 0.6 * t).toFixed(2) + ")";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,230,150,0.9)"; ctx.lineWidth = 1.2; ctx.stroke();
       }
-      ctx.restore();
+      add(b, "eyes  L " + r.lightL + "   R " + r.lightR + "   "
+           + (r.lightL === r.lightR ? "level" : r.lightL > r.lightR ? "left brighter"
+                                                                   : "right brighter"),
+          "#ffd76a");
     }
   }
 
-  ctx.restore();
+  if (show.magnetic) {
+    /* Thin, faint and everywhere, because that is the honest picture: the
+       Earth's field does not care where you stand. A child who sees the
+       SAME line in every square has learnt that a compass reading changing
+       means the robot turned, not that it moved. Drawn quietly on purpose -
+       it is a backdrop to the room, not a thing in it. */
+    const step = W / 10, len = step * 0.26;
+    const dx = Math.cos(MAG_NORTH) * len, dy = Math.sin(MAG_NORTH) * len;
+    ctx.strokeStyle = "rgba(91,192,235,0.26)";
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    for (let y = step / 2; y < W; y += step) {
+      for (let x = step / 2; x < W; x += step) {
+        ctx.moveTo(x - dx, y - dy);
+        ctx.lineTo(x + dx, y + dy);
+      }
+    }
+    ctx.stroke();
+    for (const b of snap.bodies) {
+      const r = b.reads || {};
+      if (r.compass == null) continue;
+      add(b, "compass " + Math.round(r.compass) + "\u00b0", "#5bc0eb");
+    }
+  }
 
-  /* Say which view this is, because a teacher who walks past a heat map
-     and does not know it is one will read it as a broken room. */
-  const label = view === "light" ? "Light sensors: how bright the floor is"
-              : view === "magnetic" ? "Magnetic: which way the compass points"
-              : "Sonar: what each robot's front sensor can see";
+  if (show.sonar && probe && probe.ray) {
+    /* REAL RAYS, cast now, from where the sonar really sits. Seven of them
+       across fifteen degrees, each drawn to whatever it hit with a dot on
+       the spot - and red, running off into the distance, when it hit
+       nothing at all.
+
+       Not a wedge drawn from the number the sonar returned: that picture
+       is the ANSWER, and it agrees with itself no matter what the room is
+       doing, so it can never show you why a reading is wrong. This can. */
+    for (const b of snap.bodies) {
+      const c = Math.cos(b.h || 0), sn = Math.sin(b.h || 0);
+      const ox = b.x + c * SONAR_FWD, oy = b.y + sn * SONAR_FWD;
+      for (let i = -SONAR_RAYS; i <= SONAR_RAYS; i++) {
+        const a = (b.h || 0) + i * SONAR_STEP;
+        const d = probe.ray({ x: ox, y: oy }, a, { self: b.id });
+        const hit = isFinite(d);
+        const far = hit ? d : 2400;
+        ctx.strokeStyle = hit ? "rgba(91,192,235,0.5)" : "rgba(232,87,90,0.3)";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(ox * S, oy * S);
+        ctx.lineTo((ox + Math.cos(a) * far) * S, (oy + Math.sin(a) * far) * S);
+        ctx.stroke();
+        if (hit) {
+          ctx.beginPath();
+          ctx.arc((ox + Math.cos(a) * d) * S, (oy + Math.sin(a) * d) * S, 3 * S, 0, 7);
+          ctx.fillStyle = "rgba(91,192,235,0.9)";
+          ctx.fill();
+        }
+      }
+      const cm = (b.reads || {}).sonar;
+      add(b, cm == null ? "sonar -" : cm > 0 ? "sonar " + cm + " cm" : "sonar found nothing",
+          "#8fd8ef");
+    }
+  }
+
+  /* the captions, stacked under whatever they belong to */
+  const gap = 17 * (W / 620);
+  said.forEach((items, b) => {
+    let y = (b.y + b.r + 14) * S;
+    for (const it of items) { bubble(it.text, b.x * S, y, it.colour, W); y += gap; }
+  });
+
+  const on = [];
+  if (show.light) on.push("light sensors, 0 to 1023");
+  if (show.magnetic) on.push("compass and field, the same everywhere");
+  if (show.sonar) on.push("a 15\u00b0 cone of pings, red found nothing");
+  const note = "Showing: " + on.join("   \u00b7   ");
+  const f = Math.round(12 * (W / 620));
   ctx.save();
-  ctx.font = "bold " + Math.round(12 * (W / 620)) + "px system-ui, sans-serif";
-  const pad = 8 * (W / 620), tw = ctx.measureText(label).width;
-  ctx.fillStyle = "rgba(10,12,18,0.72)";
-  roundRect(pad, pad, tw + pad * 2, 24 * (W / 620), 6);
-  ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.95)";
-  ctx.fillText(label, pad * 2, pad + 16 * (W / 620));
+  ctx.font = "600 " + f + "px system-ui, sans-serif";
+  const w = ctx.measureText(note).width + f * 1.4, h = f * 2.2;
+  ctx.fillStyle = "rgba(13,16,23,0.9)";
+  roundRect(10, W - h - 10, w, h, h * 0.35); ctx.fill();
+  ctx.fillStyle = "#dfe7f3";
+  ctx.textBaseline = "middle";
+  ctx.fillText(note, 10 + f * 0.7, W - h / 2 - 10);
   ctx.restore();
+  ctx.textBaseline = "alphabetic";
 }
 
-export function createRoomRenderer(canvas, lightMapFor) {
+export function createRoomRenderer(canvas, probe) {
   const target = canvas.getContext("2d");
   const trails = new Map();                             // id -> recent positions
   const lit = document.createElement("canvas");         // all the light, added up
@@ -721,7 +751,7 @@ export function createRoomRenderer(canvas, lightMapFor) {
     ctx.fillText("N", nx, ny - nr - 3);
     ctx.textAlign = "left";
 
-    if (o.view && o.view !== "plain") drawOverlay(snap, o.view, W, lightMapFor);
+    if (o.show) drawOverlay(snap, o.show, W, probe);
 
     /* the walls, or a dashed edge when the scene has none */
     if (snap.walls) { ctx.strokeStyle = "#49536a"; ctx.lineWidth = 6; ctx.setLineDash([]); }

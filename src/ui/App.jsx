@@ -24,7 +24,7 @@ import Card from "./Card.jsx";
 import BlocksTab from "./BlocksTab.jsx";
 
 export default function App() {
-  const { room, snap, lines, post, ask, speed, setSpeed, running, setRunning, clearLines } = useRoom();
+  const { snap, lines, post, ask, speed, setSpeed, running, setRunning, clearLines } = useRoom();
   const [page, setPage] = useState("room");
   const [chosen, setChosen] = useState(1);
   const [projects, setProjects] = useState({});
@@ -152,7 +152,7 @@ export default function App() {
         {page === "room" && (
           <>
             <div className="left">
-              <RoomView snap={snap} post={post} ask={ask} lightMap={room.lightMap} />
+              <RoomView snap={snap} post={post} ask={ask} />
               <div className="log">
                 {lines.length === 0 &&
                   <div className="empty">the robots will say what they are doing here</div>}
