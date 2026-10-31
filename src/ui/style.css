@@ -13,22 +13,52 @@
    teacher helping one child should be able to glance up and see which of
    the other nine are stuck. */
 
+/* THE PALETTE IS THE EDITOR'S.
+
+   These are not colours I chose. They are the MakeCode drawer colours,
+   read out of the cached editor bundle the class actually uses
+   (~/.pxt/mkc-cache/...target.json, the `//% color=` on each namespace),
+   which are the same colours as the printed cheatsheet. A child who knows
+   that sound blocks are the red drawer and sensing blocks are the magenta
+   one gets that knowledge back here for free, and the gym stops looking
+   like a generic dashboard and starts looking like part of the same world
+   as the editor.
+
+   The base is near-black with a violet cast rather than the usual slate,
+   because magenta and orange sit badly on blue-grey and sing on this. */
+
 :root {
-  --bg: #0e1118;
-  --panel: #171c27;
-  --panel-2: #1f2634;
-  --sunk: #0a0d14;              /* a well: screens, tracks, the log */
-  --line: #2b3447;
-  --line-2: #3a4763;
-  --fg: #eef2f8;
-  --muted: #8d9bb4;
-  --accent: #5bc0eb;
-  --mb: #a78bfa;                /* the board's colour */
-  --bb: #5bc0eb;                /* the chassis's colour */
-  --go: #46c37b;
-  --stop: #e8575a;
-  --warn: #f2b134;
+  --bg: #0a0913;
+  --panel: #161526;
+  --panel-2: #211f36;
+  --sunk: #07060e;              /* a well: screens, tracks, the log */
+  --line: #2f2c47;
+  --line-2: #433f63;
+  --fg: #f2f0fa;
+  --muted: #9a93b8;
+
+  /* straight from the drawers */
+  --d-basic: #1E90FF;
+  --d-input: #D400D4;
+  --d-music: #E63022;
+  --d-led: #5C2D91;
+  --d-radio: #E3008C;
+  --d-loops: #00AA00;
+  --d-logic: #00A4A6;
+  --d-vars: #DC143C;
+  --d-bitbot: #e7660b;
+
+  /* the same hues, lifted enough to read on near-black */
+  --accent: #46a3ff;            /* Basic - the app's own chrome */
+  --mb: #ef5cef;                /* Input - the board's half of a card */
+  --bb: #ff8f44;                /* Bit:Bot - the chassis's half */
+  --go: #2fd36f;                /* Loops */
+  --stop: #ff5f6d;              /* Variables */
+  --warn: #f5b325;
+  --teal: #27cfd1;              /* Logic - distance */
+  --hot: #ff6b4a;               /* Music - sound */
   --led: #ff2e2e;
+
   --f-ui: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
   color-scheme: dark;
@@ -47,12 +77,12 @@ button, select, input[type=number] {
   border: 1px solid var(--line); border-radius: 9px; padding: 6px 12px; cursor: pointer;
   transition: background .12s, border-color .12s, color .12s;
 }
-button:hover { border-color: var(--line-2); background: #273045; }
-button.go { background: #15382a; border-color: #2f7d55; color: #96efbe; font-weight: 600; }
-button.go:hover { background: #1b4836; border-color: var(--go); }
-button.on { background: var(--accent); border-color: var(--accent); color: #062430; font-weight: 700; }
+button:hover { border-color: var(--line-2); background: #2a2742; }
+button.go { background: #10351f; border-color: #2a8a4d; color: #7bedaa; font-weight: 600; }
+button.go:hover { background: #164828; border-color: var(--go); }
+button.on { background: var(--accent); border-color: var(--accent); color: #04172b; font-weight: 700; }
 button.quiet { color: var(--muted); }
-button.quiet:hover { color: #ffc9cb; border-color: #70383d; background: #2a1b1f; }
+button.quiet:hover { color: #ffc9cb; border-color: #7a3540; background: #2c171e; }
 button:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
 }
@@ -79,7 +109,7 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; color: var(-
 .gym > header nav button { text-transform: capitalize; border: none; background: transparent;
                            border-radius: 8px; padding: 5px 14px; color: var(--muted); }
 .gym > header nav button:hover { background: var(--panel-2); color: var(--fg); }
-.gym > header nav button.on { background: var(--accent); color: #062430; font-weight: 700; }
+.gym > header nav button.on { background: var(--accent); color: #04172b; font-weight: 700; }
 
 main { flex: 1 1 auto; min-height: 0; }
 main.tab-room { display: grid; gap: 12px; grid-template-columns: minmax(0, 54fr) minmax(0, 46fr); }
@@ -117,23 +147,24 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
         padding: 12px 13px 11px; transition: background .15s, border-color .15s, box-shadow .15s; }
 /* the state of a robot is a colour before it is a word */
-.card.live { background: #16281f; border-color: #2f7d55; box-shadow: inset 3px 0 0 var(--go); }
+.card.live { background: #112a1c; border-color: #2a8a4d;
+              box-shadow: inset 3px 0 0 var(--go), 0 0 22px -6px rgba(47,211,111,.4); }
 .card.hold { box-shadow: inset 3px 0 0 var(--accent); }
-.card.off  { background: #1b1519; border-color: #70383d; box-shadow: inset 3px 0 0 var(--stop); }
+.card.off  { background: #221520; border-color: #7a3540; box-shadow: inset 3px 0 0 var(--stop); }
 .card.off .scr, .card.off .gauges { opacity: .5; }
 
 .card .top { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
 .card .top b { font-size: 15.5px; letter-spacing: -.01em; }
 .card .ctime { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted);
                font-variant-numeric: tabular-nums; }
-.card.live .ctime { color: #96efbe; }
+.card.live .ctime { color: #7bedaa; }
 
 .st { font-size: 9px; letter-spacing: .09em; text-transform: uppercase; font-weight: 800;
       border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; color: var(--muted); }
-.st[data-st="run"]  { color: #96efbe; border-color: #2f7d55; background: #11291e; }
-.st[data-st="stop"] { color: #ffb4b7; border-color: #70383d; background: #2a1b1f; }
-.st[data-st="wait"] { color: #bfe3f5; border-color: #2d5e76; background: #10222c; }
-.st[data-st="end"]  { color: #d8c6ff; border-color: #4a3d78; background: #1b1830; }
+.st[data-st="run"]  { color: #7bedaa; border-color: #2a8a4d; background: #0f2a1a; }
+.st[data-st="stop"] { color: #ffb4bc; border-color: #7a3540; background: #2c171e; }
+.st[data-st="wait"] { color: #bfe3f5; border-color: #2a5e84; background: #0e2030; }
+.st[data-st="end"]  { color: #d8c6ff; border-color: var(--d-led); background: #1c1333; }
 
 .card .run, .card .press { display: flex; gap: 5px; }
 .card .press { margin-top: 9px; }
@@ -141,17 +172,17 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 .card .run button, .card .press button { flex: 1; padding: 6px 2px; font-size: 11.5px; }
 /* a held button stays held, and that is `reads` coming back round from the
    board - not a useState pretending */
-.card .press button.down { background: var(--accent); border-color: var(--accent);
-                           color: #062430; font-weight: 700; }
+.card .press button.down { background: var(--mb); border-color: var(--mb);
+                           color: #2b0320; font-weight: 700; }
 
 /* two halves, with a rule between them */
 .sect { display: flex; align-items: center; gap: 8px; margin: 13px 0 8px;
         font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; font-weight: 800; }
 .sect:after { content: ""; flex: 1; height: 1px; }
 .sect.mb { color: var(--mb); }
-.sect.mb:after { background: linear-gradient(90deg, #4a3d78, transparent); }
+.sect.mb:after { background: linear-gradient(90deg, #6b2a6b, transparent); }
 .sect.bb { color: var(--bb); }
-.sect.bb:after { background: linear-gradient(90deg, #2d5e76, transparent); }
+.sect.bb:after { background: linear-gradient(90deg, #7a3f14, transparent); }
 
 .mbrow { display: flex; gap: 13px; align-items: flex-start; }
 .gauges { display: grid; gap: 7px; flex: 1; min-width: 0; align-content: start; }
@@ -166,7 +197,7 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
        padding: 9px; border-radius: 9px; height: max-content; flex: none;
        border: 1px solid #1d222e; box-shadow: inset 0 1px 7px rgba(0,0,0,.8); }
 .scr span { width: 13px; height: 13px; border-radius: 2.5px; display: block;
-            background: #2a1313; }
+            background: #2b1116; }
 .scr span.on { background: var(--led); }
 .scr.dim { filter: saturate(.4) brightness(.7); }
 
@@ -189,8 +220,8 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
          border: 1px solid var(--line); overflow: hidden; display: block; }
 .track i { display: block; height: 100%; border-radius: 4px; background: var(--accent);
            transition: width .09s linear; }
-.track i.t-warm { background: linear-gradient(90deg, #8a6a2a, var(--warn)); }
-.track i.t-cool { background: linear-gradient(90deg, #2d5e76, var(--bb)); }
+.track i.t-warm { background: linear-gradient(90deg, #7d5c18, var(--warn)); }
+.track i.t-hot  { background: linear-gradient(90deg, #7d2a18, var(--hot)); }
 
 /* ---- the two light eyes, as a balance -------------------------------- */
 
@@ -203,10 +234,10 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
         display: flex; overflow: hidden; }
 .half.lh { border-radius: 6px 0 0 6px; justify-content: flex-end; border-right: none; }
 .half.rh { border-radius: 0 6px 6px 0; justify-content: flex-start; border-left: none; }
-.half i { height: 100%; background: #46829f; transition: width .09s linear; }
+.half i { height: 100%; background: #2a7f80; transition: width .09s linear; }
 /* whichever eye is winning goes gold, because "turn towards the brighter
    one" is every light-chasing program in the course */
-.half i.lead { background: linear-gradient(90deg, #8a6a2a, var(--warn)); }
+.half i.lead { background: linear-gradient(90deg, #7d5c18, var(--warn)); }
 .bal .pin { width: 2px; height: 15px; background: var(--line-2); flex: none; border-radius: 1px; }
 
 /* ---- the sonar ------------------------------------------------------- */
@@ -214,9 +245,9 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 .beam { position: relative; height: 10px; border-radius: 6px; background: var(--sunk);
         border: 1px solid var(--line); display: block; }
 .beam .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px 0 0 5px;
-              background: linear-gradient(90deg, #1f4255, #2d5e76); transition: width .09s linear; }
+              background: linear-gradient(90deg, #103a3b, #1d7778); transition: width .09s linear; }
 .beam .wall { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px;
-              border-radius: 2px; background: var(--bb); transition: left .09s linear; }
+              border-radius: 2px; background: var(--teal); transition: left .09s linear; }
 .sonar .num { font-size: 11.5px; }
 .sonar.amber .beam .wall { background: var(--warn); }
 .sonar.amber .num { color: var(--warn); }
@@ -256,6 +287,50 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 .pix .gap { width: 11px; }
 .pix i { width: 10px; height: 10px; border-radius: 50%; background: #10141d;
          border: 1px solid var(--line); display: block; transition: background .09s, box-shadow .09s; }
+
+/* ---- the compact card ------------------------------------------------
+   Ten of these fit a laptop screen, which is the whole point of them. A
+   click on the + opens one up to the full instrument panel without
+   folding the others away, so a teacher can keep one child's robot open
+   and still watch the other nine.                                       */
+
+.cards.crowded { grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); }
+/* An opened card takes the whole row.
+   Sharing a row with the compact ones was wrong twice over: it left a
+   hole the height of the open card beside them, and it squeezed the open
+   card into a compact column, where 42px of label plus 54px of number ate
+   the row and every meter collapsed to a two-pixel sliver. Full width
+   fixes both, and the long bars read better anyway. */
+.cards.crowded .card:not(.small) { grid-column: 1 / -1; }
+/* ...but a bar the width of the whole panel is just a stripe, so the two
+   halves sit side by side once there is room for them. */
+.cards.crowded .card:not(.small) .panes {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0 22px; align-items: start;
+}
+.cards.crowded .card:not(.small) .pane .sect { margin-top: 11px; }
+.card.small { padding: 9px 10px 9px; }
+.card.small .top { margin-bottom: 7px; gap: 6px; }
+.card.small .top b { font-size: 13px; }
+.card.small .ctime { font-size: 10.5px; }
+.card.small .st { font-size: 8px; padding: 1px 6px; letter-spacing: .07em; }
+.card.small .mbrow { gap: 9px; margin-bottom: 8px; }
+.card.small .gauges { gap: 6px; }
+.card.small .run button { padding: 4px 2px; font-size: 11px; }
+/* the readouts give up their labels in here - at this size the shape is
+   the label, and the row is too narrow to spend 42px saying "sonar" */
+.card.small .lab { display: none; }
+.card.small .meter, .card.small .sonar { grid-template-columns: minmax(0, 1fr) 50px; gap: 7px; }
+.card.small .eyes { grid-template-columns: 30px minmax(0, 1fr) 30px; gap: 5px; }
+.card.small .eyes .num { font-size: 10.5px; }
+.card.small .num { font-size: 11px; }
+
+.scr.sm { grid-template-columns: repeat(5, 8px); gap: 2.5px; padding: 6px; border-radius: 7px; }
+.scr.sm span { width: 8px; height: 8px; border-radius: 2px; }
+
+.caret { padding: 0; width: 20px; height: 20px; line-height: 1; flex: none;
+         border-radius: 6px; font-size: 13px; color: var(--muted);
+         display: grid; place-content: center; }
+.caret:hover { color: var(--fg); }
 
 /* ===========================================================================
    The two code tabs.

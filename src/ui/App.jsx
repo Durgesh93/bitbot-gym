@@ -22,8 +22,21 @@ export default function App() {
   const [chosen, setChosen] = useState(1);
   const [projects, setProjects] = useState({});
   const [code, setCode] = useState("");
+  /* Which crowded cards the teacher has opened up. This is view state and
+     nothing else - the gym does not know or care, and losing it on reload
+     costs nobody anything. */
+  const [open, setOpen] = useState(() => new Set());
 
   const boards = snap.bodies || [];
+  /* Past four robots a wall of full cards stops being readable, so they
+     fold down to a line each and open on a click. Four is where two
+     columns of full cards stop fitting a laptop screen. */
+  const crowd = boards.length > 4;
+  const toggle = useCallback(id => setOpen(s => {
+    const n = new Set(s);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  }), []);
   const setProject = useCallback((id, project) => {
     setProjects(old => ({ ...old, [id]: project }));
   }, []);
@@ -75,9 +88,13 @@ export default function App() {
                 ))}
               </div>
             </div>
-            <div className="cards">
+            <div className={"cards" + (crowd ? " crowded" : "")}>
               {boards.length === 0 && <p className="hint">no robots yet - add one under the room</p>}
-              {boards.map(b => <Card key={b.id} body={b} post={post} />)}
+              {boards.map(b => (
+                <Card key={b.id} body={b} post={post}
+                      compact={crowd && !open.has(b.id)}
+                      onToggle={crowd ? () => toggle(b.id) : undefined} />
+              ))}
             </div>
           </>
         )}

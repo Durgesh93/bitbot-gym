@@ -28,10 +28,11 @@ const pct = v => (clamp01(v) * 100).toFixed(1) + "%";
    light, the lit ones bloom. Brightness is 0-255 per cell and the board
    really does set it per cell, so showIcon and setBrightness look different
    here, as they do on the desk. */
-export function Screen({ cells, dim }) {
+export function Screen({ cells, dim, small }) {
   const c = cells || new Array(25).fill(0);
   return (
-    <div className={"scr" + (dim ? " dim" : "")} role="img" aria-label="the micro:bit screen">
+    <div className={"scr" + (dim ? " dim" : "") + (small ? " sm" : "")}
+         role="img" aria-label="the micro:bit screen">
       {c.map((v, i) => {
         const on = v > 0;
         const b = on ? 0.25 + 0.75 * (v / 255) : 0;

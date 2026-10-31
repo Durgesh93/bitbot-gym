@@ -15,10 +15,28 @@ import { createRoom, ROOM } from "../app/room.js";
 import { bus } from "../core/bus.js";
 import { onSay } from "../core/log.js";
 
+/* ONE GYM PER PAGE, and the room is a singleton because the bus is.
+
+   createRoom() claims the "world" address, and two rooms on one bus is an
+   error the bus is quite right to refuse. Hanging the room off a component
+   ref looked fine and was not: any remount - a hot reload, a StrictMode
+   double mount, an error boundary retry - built a second room before the
+   first had let go of the address, and the gym died on "two things answer
+   to world". A ref is for something each component owns a copy of, and
+   there is only ever one world.
+
+   import.meta.hot.data is the one thing Vite carries across a reload of
+   THIS module, so the room survives editing the UI - which also means the
+   robots stay where they were while you work on the card, and that is a
+   nicer way to build than re-adding them after every save. */
+
+const keep = (typeof import.meta !== "undefined" && import.meta.hot)
+  ? (import.meta.hot.data.gym || (import.meta.hot.data.gym = {}))
+  : {};
+
 export function useRoom(options) {
-  const roomRef = useRef(null);
-  if (!roomRef.current) roomRef.current = createRoom({ bus, ...(options || {}) });
-  const room = roomRef.current;
+  if (!keep.room) keep.room = createRoom({ bus, ...(options || {}) });
+  const room = keep.room;
 
   const [snap, setSnap] = useState(() => room.snapshot());
   const [lines, setLines] = useState([]);
