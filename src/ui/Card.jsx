@@ -27,12 +27,14 @@
 import React from "react";
 import { Screen, Meter, Eyes, Sonar, Line, Compass, Pixels, Pill } from "./parts.jsx";
 
-export default function Card({ body, post, compact, onToggle }) {
+export default function Card({ body, post, log, compact, onToggle }) {
   const p = body.program || {};
   const r = body.reads || {};
   const state = p.state || "ready";
   const cls = state === "run" ? "live" : state === "stop" ? "off" : state === "wait" ? "hold" : "";
 
+  const said = log || [];
+  const last = said[said.length - 1];
   const send = msg => post({ ...msg, id: body.id });
   const hold = (button) => ({
     onPointerDown: () => send({ cmd: "press", button, down: true }),
@@ -67,6 +69,12 @@ export default function Card({ body, post, compact, onToggle }) {
               : <><Meter label="light" value={r.light} max={255} tone="warm" />
                   <Meter label="sound" value={r.sound} max={255} tone="hot" /></>}
           </div>
+        </div>
+        {/* One line, the newest. At this size that is the whole question -
+            "what is this one doing?" - and ten of them answered at once is
+            the thing a wall of full cards could never give a teacher. */}
+        <div className={"lastsaid" + (last && last.cls === "err" ? " bad" : "")}>
+          {last ? last.msg : "\u2014"}
         </div>
         <div className="run">
           <button className="go" onClick={() => send({ cmd: "run" })}>Play</button>
@@ -123,6 +131,15 @@ export default function Card({ body, post, compact, onToggle }) {
             <p className="inhand">in hand - the <code>bitbot</code> blocks will say so politely</p>
           )}
         </div>
+      </div>
+
+      {/* Its own log. The shared one at the bottom of the room still has
+          every line from every robot; this one has only this robot's, which
+          is the question the child in front of this card is asking. */}
+      <div className="cardlog">
+        {said.length === 0
+          ? <div className="empty">this one has not said anything yet</div>
+          : said.slice(-40).map(l => <div key={l.k} className={l.cls}>{l.msg}</div>)}
       </div>
 
       <div className="press last">

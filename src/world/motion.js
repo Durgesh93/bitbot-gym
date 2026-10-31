@@ -30,13 +30,45 @@ export function createMotion(scene) {
   const robots = new Map();       // id -> { matter body, our extras }
   const furniture = [];
 
-  for (const f of scene.furniture) {
-    const b = Bodies.rectangle(f.x + f.w / 2, f.y + f.h / 2, f.w, f.h,
-                               { isStatic: true, angle: f.rot || 0, friction: 0.4 });
-    b.plugin = { kind: "furniture", spec: f };
+  /* FURNITURE IS NOT FIXED AT BIRTH.
+
+     A scene is still loaded from data, but a child adding a chair mid-lesson
+     is the point of the room, so these go in and come out one at a time.
+     `scene.furniture` stays the single truth - the light field reads it
+     directly, which is why nothing here keeps a second copy of the specs. */
+  function addThing(spec) {
+    const b = Bodies.rectangle(spec.x + spec.w / 2, spec.y + spec.h / 2, spec.w, spec.h,
+                               { isStatic: true, angle: spec.rot || 0, friction: 0.4 });
+    b.plugin = { kind: "furniture", spec: spec };
     furniture.push(b);
     Composite.add(engine.world, b);
+    return spec;
   }
+
+  function removeThing(spec) {
+    const i = furniture.findIndex(b => b.plugin.spec === spec);
+    if (i < 0) return false;
+    Composite.remove(engine.world, furniture[i]);
+    furniture.splice(i, 1);
+    return true;
+  }
+
+  function clearThings() {
+    for (const b of furniture) Composite.remove(engine.world, b);
+    furniture.length = 0;
+  }
+
+  /* What is under this point, newest first - so clicking a thing dropped on
+     top of another picks the one you can actually see. */
+  function thingAt(p) {
+    for (let i = furniture.length - 1; i >= 0; i--) {
+      const f = furniture[i].plugin.spec;
+      if (p.x >= f.x && p.x <= f.x + f.w && p.y >= f.y && p.y <= f.y + f.h) return f;
+    }
+    return null;
+  }
+
+  for (const f of scene.furniture) addThing(f);
 
   if (scene.walls) {
     const S = scene.size, h = WALL / 2;
@@ -254,5 +286,6 @@ export function createMotion(scene) {
   }
 
   return { add, remove, hold, place, drive, step, bodies, bodyOf, raycast, contacts, occluders,
+           addThing, removeThing, clearThings, thingAt,
            engine, size: () => scene.size };
 }

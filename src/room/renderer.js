@@ -325,7 +325,143 @@ function drawRadio(snap) {
   }
 }
 
-export function createRoomRenderer(canvas) {
+/* THE SENSOR VIEWS.
+
+   The room as a sensor reads it, rather than as an eye sees it. This is the
+   single most useful thing the old gym did for teaching, and the reason is
+   that every hard question a child asks is about a quantity they cannot
+   see: "why does it turn left here?", "why does it stop in the middle of
+   nothing?", "why does my compass say east?". Drawing the field answers
+   those without anyone having to believe a number.
+
+   Each one draws from the SAME data the sensors were given, never from a
+   second guess at it, so the picture and the readings cannot disagree. The
+   whole point would be lost if they could. */
+
+const MAG_LABEL = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
+function drawOverlay(snap, view, W, lightMapFor) {
+  ctx.save();
+
+  if (view === "light") {
+    /* A heat map of what the floor is worth to an eye looking up - the
+       same square of samples the room already works out for the picture,
+       so it costs nothing extra and cannot drift from it. */
+    const n = 48;
+    const map = lightMapFor ? lightMapFor(n) : null;
+    if (map) {
+      /* STRETCHED BETWEEN THIS ROOM'S OWN DARKEST AND BRIGHTEST, not between
+         zero and the brightest. A lit classroom floor sits in a narrow band
+         - the darkest corner is a good fraction of the brightest spot - so
+         measuring from zero paints the whole room one pale colour and the
+         shadow a child is being shown disappears into it. The question this
+         view answers is "where is it brighter THAN HERE", so that is the
+         question the scale has to be built for. */
+      let lo = Infinity, hi = 0;
+      for (let i = 0; i < map.length; i++) {
+        if (map[i] < lo) lo = map[i];
+        if (map[i] > hi) hi = map[i];
+      }
+      const span = (hi - lo) || 1;
+      const cell = W / n;
+      /* five stops, dark to bright, far enough apart to survive a projector
+         and to still read as an order in greyscale */
+      const RAMP = [[16, 24, 64], [28, 74, 150], [26, 160, 158],
+                    [238, 176, 50], [255, 248, 222]];
+      ctx.globalAlpha = 0.78;
+      for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++) {
+          /* sqrt, because the eye judges brightness that way and the
+             shadows are the part worth resolving */
+          const v = Math.sqrt(clamp((map[j * n + i] - lo) / span, 0, 1));
+          const t = v * (RAMP.length - 1);
+          const k = Math.min(RAMP.length - 2, Math.floor(t)), f = t - k;
+          const a = RAMP[k], b = RAMP[k + 1];
+          ctx.fillStyle = "rgb(" + Math.round(a[0] + (b[0] - a[0]) * f) + ","
+                                 + Math.round(a[1] + (b[1] - a[1]) * f) + ","
+                                 + Math.round(a[2] + (b[2] - a[2]) * f) + ")";
+          ctx.fillRect(i * cell, j * cell, cell + 1, cell + 1);
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+  } else if (view === "magnetic") {
+    /* One needle per square of floor. They all point the same way, which
+       IS the lesson: the Earth's field does not care where you stand, so a
+       compass block gives the same heading anywhere in the room, and a
+       robot that reads differently has turned, not moved. */
+    const step = W / 9;
+    ctx.globalAlpha = 0.85;
+    for (let y = step / 2; y < W; y += step) {
+      for (let x = step / 2; x < W; x += step) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(MAG_NORTH + Math.PI / 2);
+        const r = step * 0.3;
+        ctx.beginPath();                               // the red half, pointing north
+        ctx.moveTo(0, -r); ctx.lineTo(r * 0.3, 0); ctx.lineTo(-r * 0.3, 0);
+        ctx.closePath();
+        ctx.fillStyle = "rgba(232,70,74,0.95)"; ctx.fill();
+        ctx.beginPath();                               // and the white tail
+        ctx.moveTo(0, r); ctx.lineTo(r * 0.3, 0); ctx.lineTo(-r * 0.3, 0);
+        ctx.closePath();
+        ctx.fillStyle = "rgba(245,247,252,0.9)"; ctx.fill();
+        ctx.restore();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+  } else if (view === "sonar") {
+    /* The cone each robot's front sensor is actually looking down, and how
+       far it is reading. A child who can see the cone stops being surprised
+       that a chair beside the robot is invisible to it. */
+    for (const b of snap.bodies) {
+      const cm = b.reads && b.reads.sonar;
+      const reach = (cm == null || cm <= 0 ? 2000 : cm * 10);
+      const half = 0.26;                               // about 15 degrees each side
+      ctx.save();
+      ctx.translate(b.x * S, b.y * S);
+      ctx.rotate(b.h || 0);
+      const g = ctx.createRadialGradient(0, 0, b.r * S, 0, 0, reach * S);
+      g.addColorStop(0, "rgba(39,207,209,0.42)");
+      g.addColorStop(1, "rgba(39,207,209,0.03)");
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, reach * S, -half, half);
+      ctx.closePath();
+      ctx.fillStyle = g; ctx.fill();
+      ctx.strokeStyle = "rgba(39,207,209,0.8)"; ctx.lineWidth = 1.5;
+      ctx.stroke();
+      if (cm != null && cm > 0) {                      // the wall it found
+        ctx.beginPath();
+        ctx.arc(0, 0, reach * S, -half, half);
+        ctx.strokeStyle = cm < 15 ? "rgba(255,95,109,0.95)" : "rgba(39,207,209,0.95)";
+        ctx.lineWidth = 3; ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  ctx.restore();
+
+  /* Say which view this is, because a teacher who walks past a heat map
+     and does not know it is one will read it as a broken room. */
+  const label = view === "light" ? "Light sensors: how bright the floor is"
+              : view === "magnetic" ? "Magnetic: which way the compass points"
+              : "Sonar: what each robot's front sensor can see";
+  ctx.save();
+  ctx.font = "bold " + Math.round(12 * (W / 620)) + "px system-ui, sans-serif";
+  const pad = 8 * (W / 620), tw = ctx.measureText(label).width;
+  ctx.fillStyle = "rgba(10,12,18,0.72)";
+  roundRect(pad, pad, tw + pad * 2, 24 * (W / 620), 6);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.fillText(label, pad * 2, pad + 16 * (W / 620));
+  ctx.restore();
+}
+
+export function createRoomRenderer(canvas, lightMapFor) {
   const target = canvas.getContext("2d");
   const trails = new Map();                             // id -> recent positions
   const lit = document.createElement("canvas");         // all the light, added up
@@ -440,7 +576,8 @@ export function createRoomRenderer(canvas) {
   /* snap is the room's snapshot, and that is all: the light is drawn from
      the very polygons the sensors read, so the picture cannot say there is a
      shadow where the robot says there is light. */
-  function draw(snap) {
+  function draw(snap, opts) {
+    const o = opts || {};
     ctx = target;
     S = canvas.width / snap.size;
     const W = canvas.width;
@@ -545,8 +682,24 @@ export function createRoomRenderer(canvas) {
     }
     for (const id of [...trails.keys()]) if (!seen.has(id)) trails.delete(id);
 
-    drawTails(trails, snap.bodies);
+    if (o.trail !== false) drawTails(trails, snap.bodies);
     drawRadio(snap);
+
+    /* The tape being dragged out right now. It is drawn and not yet in the
+       room, which is the honest picture: nothing has told the sensors about
+       it, because a half-drawn line is not a line. */
+    if (o.pen) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(21,23,28,0.55)";
+      ctx.lineWidth = Math.max(2, 30 * S);
+      ctx.lineCap = "round";
+      ctx.setLineDash([14 * S * 8, 10 * S * 8]);
+      ctx.beginPath();
+      ctx.moveTo(o.pen.from.x * S, o.pen.from.y * S);
+      ctx.lineTo(o.pen.to.x * S, o.pen.to.y * S);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     for (const L of snap.lamps) drawBulb(L);
     for (const b of snap.bodies) drawBody(b);
@@ -567,6 +720,8 @@ export function createRoomRenderer(canvas) {
     ctx.textAlign = "center";
     ctx.fillText("N", nx, ny - nr - 3);
     ctx.textAlign = "left";
+
+    if (o.view && o.view !== "plain") drawOverlay(snap, o.view, W, lightMapFor);
 
     /* the walls, or a dashed edge when the scene has none */
     if (snap.walls) { ctx.strokeStyle = "#49536a"; ctx.lineWidth = 6; ctx.setLineDash([]); }

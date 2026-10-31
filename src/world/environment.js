@@ -18,7 +18,8 @@
    what counts as "on the line". Those are the robot's business, and keeping
    them out is what lets the same robot work in a classroom and on grass. */
 
-import { loadScene } from "./scene.js";
+import { loadScene, makeThing, scatterThings, CATALOGUE } from "./scene.js";
+import { createRandom } from "../core/random.js";
 import { createMotion } from "./motion.js";
 import { createLight } from "./fields/light.js";
 import { createSound } from "./fields/sound.js";
@@ -85,6 +86,118 @@ export function createEnvironment(data) {
     step(dt) { const out = motion.step(dt); moved(); return out; },
     bodies: () => motion.bodies(),
     bodyOf: (id) => motion.bodyOf(id),
+
+    /* ---- editing the room ------------------------------------------------
+
+       A room a child cannot change is a picture, not a room. Everything here
+       goes through `moved()` on its way out, which is the one line that
+       stops a stale shadow: the light field does not recompute when a chair
+       appears, it only marks itself stale, and the next sensor to ask pays
+       for it.
+
+       scene.furniture and scene.lines stay the single truth. motion keeps
+       matter.js in step with the first and surface keeps its own read-shaped
+       copy of the second, so there is never a second list to disagree. */
+
+    catalogue: () => Object.keys(CATALOGUE),
+
+    /* `centred` is what a pointer means: the click is where the middle of
+       the thing should sit. The catalogue measures from a corner, so take
+       half its size off - otherwise everything a child places lands down
+       and right of where they pointed, which looks like a bug and is one. */
+    addThing(name, x, y, rot, centred) {
+      const base = CATALOGUE[name];
+      if (!base) return null;
+      const spec = makeThing({
+        name: name, rot: rot || 0,
+        x: centred ? x - base.w / 2 : x,
+        y: centred ? y - base.h / 2 : y
+      });
+      scene.furniture.push(spec);
+      if (spec.speaker) scene.speakers.push(spec);
+      motion.addThing(spec);
+      moved();
+      return spec;
+    },
+
+    thingAt: (p) => motion.thingAt(p),
+
+    removeThingAt(p) {
+      const spec = motion.thingAt(p);
+      if (!spec) return null;
+      const i = scene.furniture.indexOf(spec);
+      if (i >= 0) scene.furniture.splice(i, 1);
+      const j = scene.speakers.indexOf(spec);
+      if (j >= 0) scene.speakers.splice(j, 1);
+      motion.removeThing(spec);
+      moved();
+      return spec;
+    },
+
+    /* Scatter a believable classroom. Seeded, so the same press twice in a
+       test gives the same room and an assertion means something. */
+    furnish(howMany, seed) {
+      const rng = createRandom(seed == null ? 20261031 : seed);
+      const made = scatterThings(scene, rng, howMany);
+      for (const spec of made) {
+        scene.furniture.push(spec);
+        if (spec.speaker) scene.speakers.push(spec);
+        motion.addThing(spec);
+      }
+      moved();
+      return made;
+    },
+
+    /* Empty the room, but never of its walls or its lamps: a child pressing
+       this wants the floor clear, not the lights off. */
+    clearThings() {
+      const n = scene.furniture.length;
+      scene.furniture.length = 0;
+      scene.speakers.length = 0;
+      motion.clearThings();
+      moved();
+      return n;
+    },
+
+    /* ---- tape on the floor ---------------------------------------------- */
+
+    addLine(from, to, width) {
+      const l = { from: [from.x, from.y], to: [to.x, to.y], width: width || 30 };
+      scene.lines.push(l);
+      surface.rebuild();
+      moved();
+      return l;
+    },
+
+    /* Erase by touching, the way a rubber works, rather than by picking a
+       line out of a list - the child is pointing at the floor. */
+    eraseLineAt(p, radius) {
+      const r = radius == null ? 45 : radius;
+      const keep = scene.lines.filter(l => {
+        const a = { x: l.from[0], y: l.from[1] }, b = { x: l.to[0], y: l.to[1] };
+        const vx = b.x - a.x, vy = b.y - a.y, len2 = vx * vx + vy * vy;
+        let t = len2 === 0 ? 0 : ((p.x - a.x) * vx + (p.y - a.y) * vy) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const d = Math.hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t));
+        return d > r + l.width / 2;
+      });
+      const gone = scene.lines.length - keep.length;
+      if (!gone) return 0;
+      scene.lines.length = 0;
+      for (const l of keep) scene.lines.push(l);
+      surface.rebuild();
+      moved();
+      return gone;
+    },
+
+    clearLines() {
+      const n = scene.lines.length;
+      if (!n) return 0;
+      scene.lines.length = 0;
+      surface.rebuild();
+      moved();
+      return n;
+    },
 
     lightMap,
     generation: () => generation,

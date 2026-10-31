@@ -19,12 +19,21 @@ function toSegment(p, a, b) {
 
 export function createSurface(scene) {
   const g = scene.ground;
-  const lines = scene.lines.map(l => ({
-    a: { x: l.from[0], y: l.from[1] },
-    b: { x: l.to[0], y: l.to[1] },
-    half: l.width / 2,
-    reflect: l.reflect == null ? 0.03 : l.reflect   // black tape swallows the light
-  }));
+
+  /* scene.lines is the truth; this is the same thing in the shape `at` wants
+     to read sixty times a second. A child drawing tape on the floor changes
+     the truth and then says rebuild(), so there is still exactly one list to
+     be wrong about. */
+  let lines = [];
+  function rebuild() {
+    lines = scene.lines.map(l => ({
+      a: { x: l.from[0], y: l.from[1] },
+      b: { x: l.to[0], y: l.to[1] },
+      half: l.width / 2,
+      reflect: l.reflect == null ? 0.03 : l.reflect   // black tape swallows the light
+    }));
+  }
+  rebuild();
 
   function at(p) {
     const inside = p.x >= 0 && p.y >= 0 && p.x <= scene.size && p.y <= scene.size;
@@ -40,5 +49,5 @@ export function createSurface(scene) {
              mu: g.mu, roll: g.roll, dead: g.dead, inside: inside };
   }
 
-  return { at, lines: () => lines, materials: () => MATERIALS };
+  return { at, lines: () => lines, rebuild, materials: () => MATERIALS };
 }

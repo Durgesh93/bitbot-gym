@@ -72,6 +72,18 @@
   --hot: #d8291b;               /* Music - sound */
   --led: #ff2e2e;               /* on the black screen, so unchanged */
 
+  /* the states, as a set so a theme flips all of them at once */
+  --go-bg: #e6f8ed;  --go-bg-2: #d4f2e1; --go-line: #58bd87; --go-ink: #07682f;
+  --stop-bg: #fdeef1; --stop-line: #eab3bc; --stop-ink: #a81229;
+  --wait-bg: #e9f4fd; --wait-line: #9ccdf0; --wait-ink: #0a5fa8;
+  --end-bg: #f2ebfc;  --end-line: #c0a5e4; --end-ink: #4d2585;
+  --live-bg: #f1fbf5; --live-line: #8ed7ae;
+  --off-bg: #fdf2f4;  --off-line: #eeb8c1;
+  --mb-fade: #f0c2f0; --bb-fade: #f8d3b4;
+  --warm-a: #f2cf74;  --hot-a: #f0a093;
+  --eye: #35b0b2;     --beam-a: #bfe9ea; --beam-b: #2aa6a8;
+  --pix-off: #cdd4e1; --tape-ink: #3a4560;
+
   --f-ui: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
 
@@ -80,6 +92,63 @@
   --spring: cubic-bezier(.22, 1.4, .4, 1);
   color-scheme: light;
 }
+
+/* ===========================================================================
+   NIGHT CLASSROOM.
+
+   The same gym with the lights off. It exists because a classroom is not
+   one room all year: a projector in a bright hall wants the light theme,
+   a laptop on a dark winter afternoon wants this one, and a child who
+   prefers it should simply have it.
+
+   The drawer hues move as little as they can get away with. They were
+   drawn for white, so on near-black a few have to be lifted to stay
+   legible - but they are lifted, never replaced, so Radio is still the
+   pink drawer and Bit:Bot is still the orange one. The base is a violet
+   cast rather than the usual slate, because magenta and orange sit badly
+   on blue-grey and sing on this.
+
+   Light is the default and dark is a choice, rather than the machine's
+   setting deciding: ten children on ten school accounts would otherwise
+   get two different gyms, and a teacher pointing at a screen saying "the
+   green card" needs everyone's to look the same. The switch is in the
+   header, and it is remembered. */
+:root[data-theme="dark"] {
+  --bg: #0a0913;
+  --panel: #161526;
+  --panel-2: #211f36;
+  --panel-3: #2a2742;
+  --sunk: #07060e;
+  --well: #14121f;
+  --line: #2f2c47;
+  --line-2: #433f63;
+  --fg: #f2f0fa;
+  --muted: #9a93b8;
+
+  --accent: #46a3ff;
+  --mb: #ef5cef;
+  --bb: #ff8f44;
+  --go: #2fd36f;
+  --stop: #ff5f6d;
+  --warn: #f5b325;
+  --warn-ink: #f5b325;
+  --teal: #27cfd1;
+  --hot: #ff6b4a;
+
+  --go-bg: #10351f;  --go-bg-2: #164828; --go-line: #2a8a4d; --go-ink: #7bedaa;
+  --stop-bg: #2c171e; --stop-line: #7a3540; --stop-ink: #ffb4bc;
+  --wait-bg: #0e2030; --wait-line: #2a5e84; --wait-ink: #bfe3f5;
+  --end-bg: #1c1333;  --end-line: #5C2D91; --end-ink: #d8c6ff;
+  --live-bg: #112a1c; --live-line: #2a8a4d;
+  --off-bg: #221520;  --off-line: #7a3540;
+  --mb-fade: #6b2a6b; --bb-fade: #7a3f14;
+  --warm-a: #7d5c18;  --hot-a: #7d2a18;
+  --eye: #2a7f80;     --beam-a: #103a3b; --beam-b: #1d7778;
+  --pix-off: #10141d; --tape-ink: #c3d0e4;
+  color-scheme: dark;
+}
+
+
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--fg); height: 100%; }
 body {
@@ -95,11 +164,11 @@ button, select, input[type=number] {
   transition: background .12s, border-color .12s, color .12s;
 }
 button:hover { border-color: var(--line-2); background: var(--panel-3); }
-button.go { background: #e6f8ed; border-color: #58bd87; color: #07682f; font-weight: 600; }
-button.go:hover { background: #d4f2e1; border-color: var(--go); }
+button.go { background: var(--go-bg); border-color: var(--go-line); color: var(--go-ink); font-weight: 600; }
+button.go:hover { background: var(--go-bg-2); border-color: var(--go); }
 button.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 button.quiet { color: var(--muted); }
-button.quiet:hover { color: var(--stop); border-color: #eab3bc; background: #fdeef1; }
+button.quiet:hover { color: var(--stop-ink); border-color: var(--stop-line); background: var(--stop-bg); }
 button:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
 }
@@ -120,13 +189,22 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; color: var(-
 .gym > header .clock { font-family: var(--f-mono); color: var(--muted); font-size: 13px;
                        font-variant-numeric: tabular-nums; min-width: 6ch; text-align: right; }
 
-/* the tabs, as one segmented control rather than three loose buttons */
-.gym > header nav { display: flex; gap: 2px; background: var(--panel);
-                    border: 1px solid var(--line); border-radius: 11px; padding: 3px; }
-.gym > header nav button { text-transform: capitalize; border: none; background: transparent;
-                           border-radius: 8px; padding: 5px 14px; color: var(--muted); }
-.gym > header nav button:hover { background: var(--panel-2); color: var(--fg); }
-.gym > header nav button.on { background: var(--accent); color: #fff; font-weight: 700; }
+/* Which of the two pages you are on. A word, not a tab bar - the arrows
+   do the moving, and this only has to answer "where am I". */
+.gym > header .where { font-size: 12px; color: var(--muted); letter-spacing: .02em; }
+
+/* The page turners, at the edges of the window. */
+.pager { position: fixed; top: 50%; transform: translateY(-50%); z-index: 45;
+         width: 34px; height: 60px; border-radius: 11px; font-size: 21px; line-height: 1;
+         padding: 0; display: grid; place-content: center;
+         background: var(--panel); border: 1px solid var(--line-2); color: var(--fg);
+         box-shadow: 0 4px 16px rgba(26,34,48,.14); opacity: .8;
+         transition: opacity .14s, transform .14s var(--spring), background .14s; }
+.pager:hover { opacity: 1; background: var(--panel-2); }
+.pager.right { right: 7px; }
+.pager.left  { left: 7px; }
+.pager.right:hover { transform: translateY(-50%) translateX(2px); }
+.pager.left:hover  { transform: translateY(-50%) translateX(-2px); }
 
 main { flex: 1 1 auto; min-height: 0; }
 main.tab-room { display: grid; gap: 12px; grid-template-columns: minmax(0, 54fr) minmax(0, 46fr); }
@@ -136,12 +214,21 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 
 .left { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
 .roomview { display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1 1 auto; }
+/* The box that owns whatever height the tool rows leave. min-height:0 is
+   the load-bearing line: without it a flex child refuses to shrink below
+   its content and the canvas pushes the tools off the panel. */
+.stage { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; }
 .roomview canvas { width: auto; height: auto; max-width: 100%; max-height: 100%;
                    border-radius: 12px; background: var(--sunk); display: block; margin: 0 auto;
                    touch-action: none; cursor: grab;
                    box-shadow: 0 10px 30px rgba(26,34,48,.16), 0 0 0 1px var(--line); }
 .roomview canvas:active { cursor: grabbing; }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: none; }
+/* the tool rows are a palette, so they read as one block rather than as
+   two unrelated strips of buttons */
+.roomview .tools + .tools { margin-top: -3px; }
+.tools button { padding: 5px 10px; font-size: 12px; }
+.tools select { padding: 5px 8px; font-size: 12px; }
 .tools .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
 
 .log { flex: 0 0 116px; overflow: auto; background: var(--sunk);
@@ -166,11 +253,11 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
         transition: background .15s, border-color .15s, box-shadow .15s;
         animation: arrive .34s var(--spring) both; }
 /* the state of a robot is a colour before it is a word */
-.card.live { background: #f1fbf5; border-color: #8ed7ae;
+.card.live { background: var(--live-bg); border-color: var(--live-line);
               box-shadow: inset 3px 0 0 var(--go), 0 6px 20px -10px rgba(10,122,61,.45);
               animation: wake .45s var(--spring) both; }
 .card.hold { box-shadow: inset 3px 0 0 var(--accent); animation: wake .45s var(--spring) both; }
-.card.off  { background: #fdf2f4; border-color: #eeb8c1; box-shadow: inset 3px 0 0 var(--stop);
+.card.off  { background: var(--off-bg); border-color: var(--off-line); box-shadow: inset 3px 0 0 var(--stop);
              animation: halt .45s ease-out both; }
 .card.off .scr, .card.off .gauges { opacity: .5; }
 
@@ -182,10 +269,10 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 
 .st { font-size: 9px; letter-spacing: .09em; text-transform: uppercase; font-weight: 800;
       border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; color: var(--muted); }
-.st[data-st="run"]  { color: #07682f; border-color: #58bd87; background: #e6f8ed; }
-.st[data-st="stop"] { color: #a81229; border-color: #eab3bc; background: #fdeef1; }
-.st[data-st="wait"] { color: #0a5fa8; border-color: #9ccdf0; background: #e9f4fd; }
-.st[data-st="end"]  { color: #4d2585; border-color: #c0a5e4; background: #f2ebfc; }
+.st[data-st="run"]  { color: var(--go-ink); border-color: var(--go-line); background: var(--go-bg); }
+.st[data-st="stop"] { color: var(--stop-ink); border-color: var(--stop-line); background: var(--stop-bg); }
+.st[data-st="wait"] { color: var(--wait-ink); border-color: var(--wait-line); background: var(--wait-bg); }
+.st[data-st="end"]  { color: var(--end-ink); border-color: var(--end-line); background: var(--end-bg); }
 
 .card .run, .card .press { display: flex; gap: 5px; }
 .card .press { margin-top: 9px; }
@@ -201,9 +288,9 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
         font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; font-weight: 800; }
 .sect:after { content: ""; flex: 1; height: 1px; }
 .sect.mb { color: var(--mb); }
-.sect.mb:after { background: linear-gradient(90deg, #f0c2f0, transparent); }
+.sect.mb:after { background: linear-gradient(90deg, var(--mb-fade), transparent); }
 .sect.bb { color: var(--bb); }
-.sect.bb:after { background: linear-gradient(90deg, #f8d3b4, transparent); }
+.sect.bb:after { background: linear-gradient(90deg, var(--bb-fade), transparent); }
 
 .mbrow { display: flex; gap: 13px; align-items: flex-start; }
 .gauges { display: grid; gap: 7px; flex: 1; min-width: 0; align-content: start; }
@@ -247,8 +334,8 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
          border: 1px solid var(--line); overflow: hidden; display: block; }
 .track i { display: block; height: 100%; border-radius: 4px; background: var(--accent);
            transition: width .09s linear; }
-.track i.t-warm { background: linear-gradient(90deg, #f2cf74, var(--warn)); }
-.track i.t-hot  { background: linear-gradient(90deg, #f0a093, var(--hot)); }
+.track i.t-warm { background: linear-gradient(90deg, var(--warm-a), var(--warn)); }
+.track i.t-hot  { background: linear-gradient(90deg, var(--hot-a), var(--hot)); }
 
 /* ---- the two light eyes, as a balance -------------------------------- */
 
@@ -261,10 +348,10 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
         display: flex; overflow: hidden; }
 .half.lh { border-radius: 6px 0 0 6px; justify-content: flex-end; border-right: none; }
 .half.rh { border-radius: 0 6px 6px 0; justify-content: flex-start; border-left: none; }
-.half i { height: 100%; background: #35b0b2; transition: width .09s linear; }
+.half i { height: 100%; background: var(--eye); transition: width .09s linear; }
 /* whichever eye is winning goes gold, because "turn towards the brighter
    one" is every light-chasing program in the course */
-.half i.lead { background: linear-gradient(90deg, #f2cf74, var(--warn)); }
+.half i.lead { background: linear-gradient(90deg, var(--warm-a), var(--warn)); }
 .bal .pin { width: 2px; height: 15px; background: var(--line-2); flex: none; border-radius: 1px; }
 
 /* ---- the sonar ------------------------------------------------------- */
@@ -272,7 +359,7 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 .beam { position: relative; height: 10px; border-radius: 6px; background: var(--well);
         border: 1px solid var(--line); display: block; }
 .beam .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px 0 0 5px;
-              background: linear-gradient(90deg, #bfe9ea, #2aa6a8); transition: width .09s linear; }
+              background: linear-gradient(90deg, var(--beam-a), var(--beam-b)); transition: width .09s linear; }
 .beam .wall { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px;
               border-radius: 2px; background: var(--teal); transition: left .09s linear; }
 .sonar .num { font-size: 11.5px; }
@@ -298,7 +385,7 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
         -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
         mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent); }
 .tape b { position: absolute; top: 50%; transform: translate(-50%, -50%);
-          font-size: 9.5px; font-weight: 800; letter-spacing: .06em; color: #3a4560; }
+          font-size: 9.5px; font-weight: 800; letter-spacing: .06em; color: var(--tape-ink); }
 .tape b.minor { font-size: 8px; font-weight: 600; color: var(--muted); }
 .tape .here { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
               margin-left: -.5px; background: var(--stop); opacity: .85; }
@@ -312,8 +399,30 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
 .pix .lab { width: 42px; flex: none; }
 .pix .arm { display: inline-flex; gap: 3.5px; }
 .pix .gap { width: 11px; }
-.pix i { width: 10px; height: 10px; border-radius: 50%; background: #cdd4e1;
+.pix i { width: 10px; height: 10px; border-radius: 50%; background: var(--pix-off);
          border: 1px solid var(--line); display: block; transition: background .09s, box-shadow .09s; }
+
+/* ---- what one robot is saying ---------------------------------------
+   A card's own log. The room's log below still carries every line from
+   every robot, which is the teacher's view; this is the child's.        */
+
+.cardlog { margin-top: 11px; height: 92px; overflow: auto; background: var(--sunk);
+           border: 1px solid var(--line); border-radius: 9px; padding: 6px 9px;
+           font-family: var(--f-mono); font-size: 10.5px; line-height: 1.55;
+           color: #b9c6db; }
+.cardlog div { white-space: pre-wrap; }
+.cardlog div.err { color: #ff9a9a; }
+.cardlog div.say { color: #e3c377; }
+.cardlog div.empty { color: #5a6378; font-style: italic; }
+
+/* and on a compact card, the newest line only - ten of those answer
+   "which of my ten is stuck?" in one look */
+.lastsaid { margin: 7px 0 8px; font-family: var(--f-mono); font-size: 10.5px;
+            color: var(--muted); white-space: nowrap; overflow: hidden;
+            text-overflow: ellipsis; }
+.lastsaid.bad { color: var(--stop); }
+
+.theme { min-width: 86px; }
 
 /* ---- the compact card ------------------------------------------------
    Ten of these fit a laptop screen, which is the whole point of them. A
@@ -452,7 +561,7 @@ main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px
   body { overflow: auto; display: block; }
   #app, .gym, main { height: auto; min-height: 0; display: block; }
   .gym > header { display: flex; }
-  main.tab-room, .left, .roomview { display: block; }
+  main.tab-room, .left, .roomview, .stage { display: block; }
   .roomview canvas { max-height: 62vh; margin: 0 auto 10px; }
   .tools { display: flex; margin-bottom: 10px; }
   .log { height: 96px; margin-bottom: 12px; }

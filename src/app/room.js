@@ -171,6 +171,31 @@ export function createRoom(options) {
       /* A child picking a robot up with the mouse. Held means its wheels stop
          and its encoders do not jump, which is what the real thing does when
          you lift it off the floor. */
+      /* ---- editing the room -------------------------------------------
+         All posts, because they all come from a hand: they land on the next
+         drain, between ticks, which is exactly where a hand lands. */
+      case "thing":     return env.addThing(m.name, m.x, m.y, m.rot, m.centred);
+      case "unthing":   return env.removeThingAt({ x: m.x, y: m.y });
+      case "furnish":   return env.furnish(m.count, m.seed).length;
+      case "empty":     return env.clearThings();
+      case "line":      return env.addLine(m.from, m.to, m.width);
+      case "erase":     return env.eraseLineAt({ x: m.x, y: m.y }, m.r);
+      case "clearFloor": return env.clearLines();
+      case "catalogue": return env.catalogue();
+
+      /* "Put the robot back" - to where this scene says a robot starts. With
+         no id it puts them all back, which is the one a teacher presses when
+         ten of them have ended up in a corner. */
+      case "home": {
+        const spots = env.starts();
+        const ids = m.id == null ? [...kit.keys()] : [m.id];
+        ids.forEach((id, i) => {
+          const at = spots[i % spots.length] || { x: 400, y: 1600, heading: 0 };
+          env.placeBody(id, at.x, at.y, at.heading);
+        });
+        return ids.length;
+      }
+
       case "hold":  return env.holdBody(m.id, true);
       case "drop":  return env.holdBody(m.id, false);
       case "place": return env.placeBody(m.id, m.x, m.y, m.heading);

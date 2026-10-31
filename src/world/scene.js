@@ -86,7 +86,7 @@ export function loadScene(data) {
     sun: d.sun ? { azimuth: 0, elevation: 45, I: 600, ...d.sun } : null,
     medium: { ...DEFAULTS.medium, ...(d.medium || {}) },
     radioReach: d.radioReach == null ? DEFAULTS.radioReach : d.radioReach,
-    furniture: (d.furniture || []).map(furnish),
+    furniture: (d.furniture || []).map(makeThing),
     lamps: (d.lamps || []).map(lamp),
     speakers: [],                     // filled in below, from the furniture
     lines: (d.lines || []).map(line),
@@ -113,7 +113,7 @@ export function loadScene(data) {
   return s;
 }
 
-function furnish(f) {
+export function makeThing(f) {
   const base = CATALOGUE[f.name] || {};
   const o = { name: f.name || "box", rot: 0, ...base, ...f };
   if (!(o.w > 0 && o.h > 0)) fail("a \"" + o.name + "\" has no size");
@@ -149,4 +149,48 @@ function line(l) {
 function start(p) {
   const o = { x: 400, y: 1600, heading: 0, ...p };
   return o;
+}
+
+
+/* FURNISHING A ROOM AT RUNTIME.
+
+   The old gym had a "Furnish room" button and it earned its place: a bare
+   square teaches nothing, and typing twelve pieces of furniture into a
+   scene file is not something you do between two lessons. This scatters a
+   believable classroom, keeping things off each other and off the middle
+   of the floor so there is still somewhere to drive.
+
+   It takes the random source as an argument rather than reaching for the
+   global one, because a test that cannot pin the layout cannot assert
+   anything about it. */
+const SCATTER = ["table", "chair", "chair", "bookcase", "plant", "bin",
+                 "backpack", "toy box", "notebook", "cupboard", "box", "pencil box"];
+
+export function scatterThings(scene, rng, how_many) {
+  const want = how_many == null ? 9 : how_many;
+  const made = [];
+  const taken = scene.furniture.slice();
+  const clash = (o) => taken.some(t =>
+    o.x < t.x + t.w + 90 && o.x + o.w + 90 > t.x &&
+    o.y < t.y + t.h + 90 && o.y + o.h + 90 > t.y);
+
+  for (let i = 0; i < want; i++) {
+    const name = SCATTER[Math.floor(rng.next() * SCATTER.length)];
+    const base = CATALOGUE[name];
+    if (!base) continue;
+    /* twenty tries, then give up on this one - a crowded room should get
+       fewer things, never an infinite loop */
+    for (let go = 0; go < 20; go++) {
+      const o = makeThing({
+        name: name,
+        x: 180 + rng.next() * (scene.size - 360 - base.w),
+        y: 180 + rng.next() * (scene.size - 360 - base.h),
+        rot: rng.next() < 0.5 ? 0 : Math.PI / 2
+      });
+      if (clash(o)) continue;
+      taken.push(o); made.push(o);
+      break;
+    }
+  }
+  return made;
 }
