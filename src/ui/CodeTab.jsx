@@ -7,42 +7,10 @@
    MakeCode shows under its own "JavaScript" tab pastes in unchanged. */
 
 import React, { useState } from "react";
-
-const EXAMPLES = {
-  "Light chaser": `basic.forever(function () {
-    if (bitbot.readLight(BBLightSensor.Left) > bitbot.readLight(BBLightSensor.Right)) {
-        bitbot.rotate(BBRobotDirection.Left, 40)
-    } else {
-        bitbot.rotate(BBRobotDirection.Right, 40)
-    }
-    basic.pause(100)
-})`,
-  "Don't bump into things": `basic.forever(function () {
-    let cm = bitbot.sonar(BBPingUnit.Centimeters)
-    if (cm > 0 && cm < 20) {
-        bitbot.rotate(BBRobotDirection.Right, 50)
-        basic.pause(400)
-    } else {
-        bitbot.go(BBDirection.Forward, 50)
-    }
-    basic.pause(50)
-})`,
-  "Follow the line": `basic.forever(function () {
-    let l = bitbot.readLine(BBLineSensor.Left)
-    let r = bitbot.readLine(BBLineSensor.Right)
-    if (l && !r) { bitbot.rotate(BBRobotDirection.Left, 35) }
-    else if (r && !l) { bitbot.rotate(BBRobotDirection.Right, 35) }
-    else { bitbot.go(BBDirection.Forward, 35) }
-    basic.pause(20)
-})`,
-  "Say hello on the radio": `radio.setGroup(1)
-radio.onReceivedNumber(function (n) {
-    basic.showNumber(n)
-})
-input.onButtonPressed(Button.A, function () {
-    radio.sendNumber(7)
-})`
-};
+/* The same programs the regression runs - see src/app/examples.js. A menu
+   entry that no longer works would turn `npm test` red before a class
+   found out, which is the whole reason they do not live in this file. */
+import { EXAMPLES } from "../app/examples.js";
 
 export default function CodeTab({ boards, chosen, onChoose, onTransfer, code, setCode }) {
   const [text, setText] = useState(code || "");

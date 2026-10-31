@@ -1,0 +1,25 @@
+# GitHub Pages serves this repository's root, and with no _config.yml it was
+# serving ALL of it - the source tree, the tests, and the two Vite entry
+# points. /gym.html in particular rendered a broken page: it asks for
+# src/ui/main.jsx, and Pages has no build step, so the browser refuses the
+# JSX as a module and you get a white screen with the gym's name on the tab.
+#
+# Only the published gym and the files it needs are a website. Everything
+# here is still in the repo and still on your machine; it is just not served.
+exclude:
+  - src
+  - test
+  - tools
+  - legacy
+  - dist
+  - dist-ship
+  - node_modules
+  - gym.html
+  - inspector.html
+  - package.json
+  - package-lock.json
+  - vite.config.js
+  - vitest.config.js
+  - vitest.setup.js
+  - ARCHITECTURE.md
+  - .claude
