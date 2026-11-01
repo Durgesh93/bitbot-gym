@@ -100,13 +100,13 @@ export function capture(snap, saved, editors, name) {
    it - off a USB stick, out of an email - so it is checked rather than
    trusted. It says what is wrong in words a teacher can act on. */
 export function check(p) {
-  if (!p || typeof p !== "object") return "that file is not a saved room";
+  if (!p || typeof p !== "object") return "that file is not a saved project";
   if (p.gym !== FORMAT)
     return p.gym > FORMAT
-      ? "that room was saved by a newer gym than this one"
-      : "that file is not a saved room, or is too old to open";
-  if (!p.room || typeof p.room !== "object") return "that saved room has no room in it";
-  if (!Array.isArray(p.boards)) return "that saved room has no boards in it";
+      ? "that project was saved by a newer gym than this one"
+      : "that file is not a saved project, or is too old to open";
+  if (!p.room || typeof p.room !== "object") return "that project has no room in it";
+  if (!Array.isArray(p.boards)) return "that project has no boards in it";
   return null;
 }
 

@@ -367,18 +367,6 @@ button.go:disabled { background: var(--well); border-color: var(--line);
                      color: var(--muted); }
 
 /* The page turners, at the edges of the window. */
-.pager { position: fixed; top: 50%; transform: translateY(-50%); z-index: 45;
-         width: 34px; height: 60px; border-radius: 11px; font-size: 21px; line-height: 1;
-         padding: 0; display: grid; place-content: center;
-         background: var(--panel); border: 1px solid var(--line-2); color: var(--fg);
-         box-shadow: 0 4px 16px rgba(26,34,48,.14); opacity: .8;
-         transition: opacity .14s, transform .14s var(--spring), background .14s; }
-.pager:hover { opacity: 1; background: var(--panel-2); }
-.pager.right { right: 7px; }
-.pager.left  { left: 7px; }
-.pager.right:hover { transform: translateY(-50%) translateX(2px); }
-.pager.left:hover  { transform: translateY(-50%) translateX(-2px); }
-
 main { flex: 1 1 auto; min-height: 0; }
 main.tab-room { display: grid; gap: 12px; grid-template-columns: minmax(0, 54fr) minmax(0, 46fr); }
 main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px; }
@@ -767,7 +755,6 @@ main.tab-room .left .roomview { flex: 1 1 auto; }
   .gym > header .clock { font-size: 11px; }
   .menubtn { padding: 6px 8px; }
   .menubtn em { display: none; }                    /* the tick inside still says it */
-  .pager { width: 26px; }
 }
 @media (max-width: 430px) {
   /* a phone, or a pane dragged down to a sliver: the menus are the app */

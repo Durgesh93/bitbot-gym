@@ -161,8 +161,8 @@ describe("saving a room as a project", () => {
      gym, off a stick or out of an email, so it is checked and not
      trusted. Each of these says something a teacher can act on. */
   it("says what is wrong with a file rather than falling over", () => {
-    expect(check(null)).toMatch(/not a saved room/);
-    expect(check({ hello: 1 })).toMatch(/not a saved room/);
+    expect(check(null)).toMatch(/not a saved project/);
+    expect(check({ hello: 1 })).toMatch(/not a saved project/);
     expect(check({ gym: FORMAT + 1 })).toMatch(/newer gym/);
     expect(check({ gym: FORMAT, boards: [] })).toMatch(/no room in it/);
     expect(check({ gym: FORMAT, room: {} })).toMatch(/no boards in it/);

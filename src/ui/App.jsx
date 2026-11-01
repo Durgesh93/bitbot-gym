@@ -1,11 +1,11 @@
 /* The gym.
 
-   TWO PAGES, turned by an arrow at the edge of the screen or by one finger
-   across it: the blocks on one, the room and the boards on the other. Not
-   a row of tabs. A tab bar invites a third tab and then a fourth, and the
-   gym is two things - you build, then you watch - so the navigation should
-   be able to say only that. It is also the one gesture that works the same
-   on a trackpad, a touchscreen and a projector remote.
+   TWO PAGES: the blocks on one, the room and the boards on the other.
+   Not a row of tabs. A tab bar invites a third tab and then a fourth, and
+   the gym is two things - you build, then you watch - so the navigation
+   should be able to say only that. You go in by the Code button on the
+   board you mean and come out by the labelled button inside the blocks;
+   one finger across the page still turns it, for anyone who finds it.
 
    The whole of the state React owns is which page is showing, which board
    the editor is pointed at, and the last snapshot - and the snapshot is
@@ -30,8 +30,8 @@ export default function App() {
   const { snap, lines, post, ask, speed, setSpeed, running, setRunning, clearLines } = useRoom();
   /* Which robot's blocks are open over the room, or null for none. There is
      no second PAGE any more: the editor is a sheet over the whole window,
-     opened from the robot it belongs to. The arrow at the edge still opens
-     it, because that gesture was worth keeping. */
+     opened from the robot it belongs to - which is the point, because the
+     blocks you want are always some particular robot's. */
   const [coding, setCoding] = useState(null);
 
   /* THE ROOM'S CONTROLS LIVE UP HERE, because the menu bar does.
@@ -210,7 +210,7 @@ export default function App() {
   }, [ask, post, snap]);
 
   const saveToFile = useCallback(() => {
-    const name = window.prompt("What shall this room be called?", "my room");
+    const name = window.prompt("What shall this project be called?", "my project");
     if (name == null) return;
     const p = captureNow(name);
     const blob = new Blob([JSON.stringify(p, null, 2)], { type: "application/json" });
@@ -230,7 +230,7 @@ export default function App() {
     if (!file) return;
     let p;
     try { p = JSON.parse(await file.text()); }
-    catch (e) { say("that file is not a saved room", "err"); return; }
+    catch (e) { say("that file is not a saved project", "err"); return; }
     openProject(p);
     if (check(p) === null && shelf.put(p)) setRooms(shelf.list());
   }, [openProject]);
@@ -400,12 +400,18 @@ export default function App() {
                 radio lesson is looking for a room. The file comes first
                 because it is the one that survives a new laptop; the
                 list under it is this browser's own copy, for speed. */}
-            <Menu label="Rooms" chip={rooms.length ? String(rooms.length) : null}>
+            {/* PROJECTS, not "Rooms". It sat next to "Room" and the two
+                were read as the same menu twice - and they are not even
+                the same kind of thing: Room is the furniture you are
+                standing in, this is the whole lesson saved to a file.
+                The word "room" is out of the wording here for the same
+                reason. */}
+            <Menu label="Projects" chip={rooms.length ? String(rooms.length) : null}>
               <Item onClick={saveToFile} hint="a .gym.json you can keep or send on">
-                Save this room to a file
+                Save this as a project
               </Item>
               <Item onClick={() => projectFile.current && projectFile.current.click()}
-                    hint="sets the whole room up again">Open a room file</Item>
+                    hint="sets the whole lesson up again">Open a project file</Item>
               {rooms.length > 0 && <Sep label="saved in this browser" />}
               {rooms.map(r => (
                 <Item key={r.name} onClick={() => { const p = shelf.get(r.name); if (p) openProject(p); }}
@@ -415,10 +421,10 @@ export default function App() {
               ))}
               {rooms.length > 0 && (
                 <Item onClick={() => {
-                        const name = window.prompt("Forget which room? (its file is not touched)");
+                        const name = window.prompt("Forget which project? (its file is not touched)");
                         if (name && shelf.remove(name)) setRooms(shelf.list());
                       }}
-                      hint="only from this browser, never the file">Forget a saved room</Item>
+                      hint="only from this browser, never the file">Forget a saved project</Item>
               )}
             </Menu>
 
@@ -507,12 +513,14 @@ export default function App() {
                  onTransfer={transfer} projects={projects} setProject={setProject}
                  open={coding != null} onClose={() => setCoding(null)} />
 
-      {/* The arrow. Fixed to the edge of the window rather than placed in
-          the layout, so it is in the same spot whatever is on screen. */}
-      {coding == null && boards.length > 0 && (
-        <button className="pager left" title="the blocks for the chosen board"
-                onClick={() => setCoding(chosenId)}>{"\u2039"}</button>
-      )}
+      {/* THE EDGE ARROW IS GONE. It was the way into the blocks before
+          every card had its own Code button, and once they did it was a
+          second door to the same room - floating over the floor, pointing
+          the wrong way, and opening the blocks for whichever board was
+          "chosen", which is a thing the arrow never showed you. The way
+          in is the Code button on the board you mean; the way out is the
+          labelled "> the room" button inside the blocks. The swipe still
+          works for anyone who finds it. */}
     </div>
   );
 }

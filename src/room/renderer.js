@@ -643,14 +643,23 @@ function drawOverlay(snap, show, W, probe) {
         x: b.x + c * 55 - sn * side,
         y: b.y + sn * 55 + c * side
       });
+      /* THE BLOB HAS TO BE VISIBLE AT ITS DIMMEST, not only when the
+         torch is on it. These were pale cream going paler, which on a
+         warm buff floor meant a dim eye - exactly the reading a child
+         is trying to see go up - was invisible, and on a projector so
+         was a bright one. So the colour runs deep burnt orange to hot
+         orange instead of cream to white, and the dark ring round it is
+         always there, so there is something to find even at zero. Size
+         and opacity still carry the reading. */
       for (const [p, v] of [[eye(-34), r.lightL], [eye(34), r.lightR]]) {
         const t = clamp(v / 1023, 0, 1);
         ctx.beginPath();
         ctx.arc(p.x * S, p.y * S, (7 + 9 * t) * S, 0, 7);
-        ctx.fillStyle = "rgba(255," + Math.round(200 + 55 * t) + ","
-                      + Math.round(80 + 120 * t) + "," + (0.25 + 0.6 * t).toFixed(2) + ")";
+        ctx.fillStyle = "rgba(" + Math.round(150 + 105 * t) + ","
+                      + Math.round(55 + 90 * t) + "," + Math.round(5 + 20 * t) + ","
+                      + (0.55 + 0.37 * t).toFixed(2) + ")";
         ctx.fill();
-        ctx.strokeStyle = "rgba(255,230,150,0.9)"; ctx.lineWidth = 1.2; ctx.stroke();
+        ctx.strokeStyle = "rgba(74,30,4,0.95)"; ctx.lineWidth = 1.6; ctx.stroke();
       }
       add(b, "eyes  L " + r.lightL + "   R " + r.lightR + "   "
            + (r.lightL === r.lightR ? "level" : r.lightL > r.lightR ? "left brighter"
@@ -676,7 +685,13 @@ function drawOverlay(snap, show, W, probe) {
         const d = probe.ray({ x: ox, y: oy }, a, { self: b.id });
         const hit = isFinite(d);
         const far = hit ? d : 2400;
-        ctx.strokeStyle = hit ? "rgba(91,192,235,0.5)" : "rgba(232,87,90,0.3)";
+        /* DARK blue, not the light blue this started as. The pings are
+           drawn on the floor, and the floor is a warm buff sheet - a
+           pale blue line at half opacity on top of it was all but
+           invisible on a classroom projector. Dark reads on buff. The
+           caption below is a different matter and stays pale, because
+           it sits on its own near-black bubble. */
+        ctx.strokeStyle = hit ? "rgba(12,58,138,0.75)" : "rgba(200,40,44,0.5)";
         ctx.lineWidth = 1.2;
         ctx.beginPath();
         ctx.moveTo(ox * S, oy * S);
@@ -685,7 +700,7 @@ function drawOverlay(snap, show, W, probe) {
         if (hit) {
           ctx.beginPath();
           ctx.arc((ox + Math.cos(a) * d) * S, (oy + Math.sin(a) * d) * S, 3 * S, 0, 7);
-          ctx.fillStyle = "rgba(91,192,235,0.9)";
+          ctx.fillStyle = "rgba(12,58,138,0.95)";
           ctx.fill();
         }
       }

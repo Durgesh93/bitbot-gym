@@ -289,7 +289,7 @@ Quick, but worth doing after anything that touches the shell:
 - There is no clock readout in the header and no room picker in the Room
   menu: one room, and the speed control is under **Clock**.
 
-## 19. Saving a room and opening it again
+## 19. Saving a project and opening it again
 
 This is the one a lesson leans on: if it half works, next week's class
 starts with a room that is nearly right, which is worse than an empty one.
@@ -297,11 +297,11 @@ starts with a room that is nearly right, which is worse than an empty one.
 1. Build a room worth keeping: a Bit:Bot and a micro:bit, a table, a
    magnet, a line on the floor, and a program loaded onto at least one
    board. Note what the cards read - **LIGHT**, **SOUND**, **MAGNET**.
-2. **Rooms → Save this room to a file**, give it a name. A
+2. **Projects → Save this as a project**, give it a name. A
    `<name>.gym.json` lands in Downloads and the name appears in the
-   Rooms menu underneath.
+   Projects menu underneath.
 3. **Reload the page.** The room comes back empty, as it should.
-4. **Rooms → <name>**. Everything is back: both boards on their spots and
+4. **Projects → <name>**. Everything is back: both boards on their spots and
    facing the way they faced, the table, the magnet, the line, the radio
    groups, and **the code still on the board** - press Play and it runs.
 5. **The cards read the same three numbers as in step 1.** This is the
