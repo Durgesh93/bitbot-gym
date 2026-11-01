@@ -25,6 +25,13 @@ export const ENUMS = {
     ScreenDown: "down", TiltLeft: "tiltleft", TiltRight: "tiltright", FreeFall: "freefall"
   },
   TouchPin: { P0: "P0", P1: "P1", P2: "P2", Logo: "logo" },
+  /* What a touch button did. The gym only ever acts on a press - the logo
+     handler takes this and ignores it - but it has to be HERE, or every
+     program with a logo block in it opens with "TouchButtonEvent is not
+     one the gym knows" across the log before it has done anything, and a
+     teacher reasonably reads that as the block not working. The numbers
+     are the micro:bit's own. */
+  TouchButtonEvent: { Pressed: 3, Touched: 1, Released: 2, LongPressed: 4 },
   Note: anyName(),
   BeatFraction: anyName(),
   PlaybackMode: { UntilDone: 0, InBackground: 1, LoopingInBackground: 2 },

@@ -230,7 +230,47 @@ says so in the bar and in the log rather than failing quietly.
 > a project resets the editor, which brings MakeCode's little simulator
 > back and shrinks the blocks, undoing both of the things done at startup.
 
-## 17. The rest of the sweep
+## 17. The self test, watched
+
+The one check that touches everything at once. **Code** on a robot's card,
+**Open a .hex**, pick `checks/Gym Self Test.hex`, go back to the room and
+press **Play**. It takes about half a minute. Watch for all of it:
+
+| what you should see | what it proves |
+|---|---|
+| `GO` scrolls, then a heart | the screen, strings and icons |
+| **SOUND** jumps to 255 for a moment | the buzzer, and a board hearing itself |
+| **ARMS** go red, then green, then out | the FireLeds |
+| the robot drives, stops, spins right, stops | both wheels, and braking |
+| six numbers scroll past | sonar, the Bit:Bot light sensor, a line sensor, the micro:bit light sensor, the microphone, the compass |
+| a ring spreads out from the robot | the radio |
+| a tick | it got to the end |
+
+Then the four it cannot do for itself. Press **A** (shows the light
+level), **B** (reverses a step), **logo** (shows the heading), **shake**
+(a surprised face).
+
+**The log must start at `show "GO"`.** Anything above that line is the gym
+saying it did not recognise something.
+
+> **Guards:** this is how `TouchButtonEvent` was found missing from
+> ENUMS. The logo block worked - the handler ignores the event argument -
+> but every program containing one opened with a complaint across the top
+> of the log, which reads as a broken block. Neither existing test caught
+> it: `all-blocks.test.js` calls blocks straight off the object, and no
+> sample program used a micro:bit EVENT enum.
+>
+> `test/app/selftest.test.js` now runs this same hex headlessly on every
+> `npm test` - it reads the source out OF the hex, so the two cannot
+> drift - and insists it ends clean. What it cannot check is the half in
+> the table above: whether the lights really went red, whether the robot
+> really moved. That is why this check is here as well.
+
+**If a press does nothing, press it again** while the screen is idle. A
+scrolling number blocks the event queue, which is exactly what a real
+micro:bit does.
+
+## 18. The rest of the sweep
 
 Quick, but worth doing after anything that touches the shell:
 
