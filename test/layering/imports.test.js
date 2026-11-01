@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, dirname, resolve, sep } from "node:path";
 
 /* THE LAYERING RULE, as a test.
@@ -85,9 +85,13 @@ describe("the layering rule", () => {
     });
   }
 
-  it("never reaches into the legacy folder", () => {
-    /* legacy/ is the old single file cut into pieces. It is there to read,
-       not to import: it has no exports and leans on globals. */
+  it("has no legacy folder left to reach into", () => {
+    /* legacy/ was the old single file cut into pieces, kept to read from
+       while src/ was written. src/ IS the gym now - index.html is built
+       from it - so the folder is gone, and this is the test that used to
+       stop anything importing from it, left here as the thing that would
+       notice it coming back. */
+    expect(existsSync(resolve(SRC, "../legacy"))).toBe(false);
     for (const file of files) {
       const text = readFileSync(file, "utf-8");
       expect(text, relative(SRC, file) + " imports from legacy/").not.toMatch(/legacy\//);

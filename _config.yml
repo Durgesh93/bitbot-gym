@@ -10,7 +10,6 @@ exclude:
   - src
   - test
   - tools
-  - legacy
   - dist
   - dist-ship
   - node_modules
