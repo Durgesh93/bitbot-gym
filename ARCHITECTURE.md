@@ -119,12 +119,17 @@ sync. `test/app/room.test.js` holds that promise from both ends.
 | folder      | may import            | never imports        |
 |-------------|-----------------------|----------------------|
 | `core/`     | nothing of ours       | everything           |
+| `vendor/`   | nothing at all        | everything           |
 | `hardware/` | `core/`               | world, ui, room      |
 | `world/`    | `core/`, `hardware/`  | ui, room             |
 | `api/`      | `core/`, `hardware/`  | world, ui, room      |
 | `app/`      | all of the above      | -                    |
 | `ui/`       | `core/`, `app/`, `room/`, `world/scenes/` | hardware, the fields |
 | `room/`     | `core/`, `app/`       | hardware, world      |
+
+`vendor/` is somebody else's code copied in verbatim, so it sits below even
+`core/` and anyone may reach it, exactly like a library from npm. There is
+one thing in it and the file says why.
 
 A test enforces this, so the layering cannot quietly rot. It is also the fix
 for the bug we kept hitting: when the blocks could reach straight into the
@@ -217,6 +222,16 @@ about how far along, so Matter narrows the field and flatten measures. Its
 `Ray` takes a normal rather than a direction, so a `Segment` is used, which is
 also the honest shape for a sensor with a 2 m reach.
 
+**LZMA-JS**, decoder only, is copied into `src/vendor/` rather than imported,
+and that is the whole of `vendor/`. A MakeCode .hex carries the project that
+built it compressed inside, which is what lets a lesson's hex be opened back
+into blocks; the old gym fetched this decoder off a CDN the first time
+anybody pressed the button, which is a download on school wifi at the moment
+a lesson starts. Eight kilobytes at build time is the better trade. It is
+copied rather than imported because it ends by hanging itself off `this`, an
+old trick that no bundler reads as a module - the only edit is that last
+line, and the file says so at the top.
+
 **visibility-polygon** gives the light field the lit region of a source, which
 is what makes a tall thing's shadow run on until it meets a wall. Things
 shorter than the lamp get a shadow that ENDS, and that is similar triangles
@@ -245,6 +260,48 @@ with four things the rest of the gym uses:
 different robot, or a new sensor, is a new file of the same shape and no
 change anywhere else. Notice what is *not* there: nothing that knows what
 another device is, and nothing that knows what time it is.
+
+### Two kinds of thing in the room
+
+A **micro:bit** is the brain: screen, buttons, compass, radio, and a light
+and sound sensor on the board itself. A **Bit:Bot** is that brain in a body
+with wheels, eyes, line sensors and a sonar. Both go in the room, and which
+one a thing is, is decided when it is put there - **two kinds, not one kind
+with a switch on it**. (`plug` is still the internal mechanism `add` uses,
+and tests drive it; nothing in the UI offers it.)
+
+That is not a flag on a card. Without a chassis, the board samples only
+`microbit.PROBES`, so it has no eyes and no sonar to report - the numbers
+are absent, not hidden - and the thing in the room shrinks from a chassis
+to a board, which the sonar of the robot beside it finds out about. Bit:Bots
+are named `Bit:Bot 1, 2, 3` and bare boards `micro:bit A, B, C`, because
+"pass me micro:bit C" has to pick out one thing in a room of ten.
+
+### The blocks, and where they are
+
+The MakeCode editor is a **sheet over the whole window**, opened by the Code
+button on a robot's card and bound to that robot; Transfer sends the blocks
+to it and closes the sheet. It is never unmounted, only hidden, because
+MakeCode takes seconds to load and a Code button that stalls reads as a
+broken one.
+
+One rule learnt the hard way: **`window.prompt` is not available.** It
+throws in the desktop app's own browser and is unreliable in an installed
+PWA, so a rename built on it silently did nothing. Anything that asks the
+child for text is an input in the page.
+
+### Editing the room
+
+`scene.furniture` and `scene.lines` stay the single truth; motion keeps
+matter.js in step and surface keeps a read-shaped copy. Every edit calls
+`moved()`, which marks the light field stale exactly once.
+
+Each thing carries a `uid`, counted from one again at every scene load so a
+seed still reproduces a room. The id exists for the pointer: a drag has to
+hold one chair for the length of the drag, and "whatever is under the
+pointer" stops being that chair the moment the mouse runs ahead of it. So
+`moveThing`, `turnThing`, `copyThing` and `removeThing` all take a uid, and
+only `addThing` / `removeThingAt` work by position.
 
 ## Running a child's program
 

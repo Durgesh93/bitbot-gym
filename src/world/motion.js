@@ -84,11 +84,22 @@ export function createMotion(scene) {
 
   /* ---- bodies ---------------------------------------------------------- */
 
+  /* HOW HARD THE TYRES HOLD before they slip. One number for every robot,
+     because it is a property of the floor as much as of the tyre, and a
+     class measuring their own Bit:Bot on their own hall floor sets it once
+     and has the gym agree with them. */
+  let grip = 0.3;
+  function setGrip(v) {
+    grip = Math.max(0.05, Math.min(1.2, v));
+    for (const b of robots.values()) b.friction = grip;
+    return grip;
+  }
+
   function add(spec) {
     const r = spec.r == null ? 62 : spec.r;
     const b = Bodies.circle(spec.x, spec.y, r, {
       frictionAir: 0,            // our own model does the drag; Matter must not double it
-      friction: 0.3,
+      friction: grip,
       restitution: 0.05,         // a Bit:Bot does not bounce off a table leg
       mass: 0.25
     });
@@ -97,6 +108,20 @@ export function createMotion(scene) {
     robots.set(spec.id, b);
     Composite.add(engine.world, b);
     return view(b);
+  }
+
+  /* A board taken off its chassis is a smaller thing, and it has to be
+     smaller to the world as well as in the picture, or a bare micro:bit
+     stops a sonar ping from a hand's width away. Matter scales a circle's
+     radius with the body, so this is the whole of it. */
+  function resize(id, r) {
+    const b = robots.get(id);
+    if (!b || !r) return false;
+    const was = b.plugin.r;
+    if (!was || Math.abs(r - was) < 0.5) return false;
+    Body.scale(b, r / was, r / was);
+    b.plugin.r = r;
+    return true;
   }
 
   function remove(id) {
@@ -285,7 +310,7 @@ export function createMotion(scene) {
     return out;
   }
 
-  return { add, remove, hold, place, drive, step, bodies, bodyOf, raycast, contacts, occluders,
+  return { add, remove, resize, setGrip, grip: () => grip, hold, place, drive, step, bodies, bodyOf, raycast, contacts, occluders,
            addThing, removeThing, clearThings, thingAt,
            engine, size: () => scene.size };
 }

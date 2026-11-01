@@ -168,12 +168,50 @@ describe("the room", () => {
     expect(b.snapshot()).toEqual(a.snapshot());
   });
 
-  it("clears the robots out when a new scene opens", () => {
-    bus.send(ROOM, { cmd: "add" });
-    expect(room.bodies()).toHaveLength(1);
-    bus.send(ROOM, { cmd: "scene", name: "outdoor" });
-    expect(room.bodies()).toHaveLength(0);
-    expect(room.env().name).toBe("Playground");
+  it("keeps the robots when the room is opened again", () => {
+    /* A room is the floor and the furniture. The children's robots are not
+       part of it, and emptying the room of ten named boards with ten
+       transferred programs was never what anybody meant by "set the room
+       back". They are put down at the start again, with their names and
+       their code still on them. */
+    const a = bus.send(ROOM, { cmd: "add" });
+    bus.send(ROOM, { cmd: "rename", id: a, name: "Ayesha's Rover" });
+    bus.send(ROOM, { cmd: "load", id: a, code: "basic.showNumber(7)" });
+    bus.send(ROOM, { cmd: "add", kind: "microbit" });
+    expect(room.bodies()).toHaveLength(2);
+    bus.send(ROOM, { cmd: "place", id: a, x: 1700, y: 1700, heading: 0 });
+
+    bus.send(ROOM, { cmd: "scene", name: "classroom" });
+    expect(room.env().name).toBe("Classroom");
+    expect(room.bodies()).toHaveLength(2);
+
+    room.tick();
+    const mine = room.snapshot().bodies.find(x => x.id === a);
+    expect(mine.program.name).toBe("Ayesha's Rover");
+    expect(mine.program.state).toBe("ready");          // loaded, waiting for Play
+    /* and it is standing at the start again, not where it had got to */
+    const start = room.env().starts()[0];
+    const b = room.bodies().find(x => x.id === a);
+    expect(Math.hypot(b.x - start.x, b.y - start.y)).toBeLessThan(700);
+  });
+
+  it("sets the robots down apart from each other, not on one spot", () => {
+    /* The classroom names ONE start spot, so four robots used to arrive on
+       the same square millimetre: that looks like one robot and is four,
+       and the child who presses Play watches the wrong one. */
+    const ids = [0, 1, 2, 3].map(() => bus.send(ROOM, { cmd: "add" }));
+    const far = () => {
+      const all = ids.map(id => room.bodies().find(b => b.id === id));
+      let nearest = Infinity;
+      for (let i = 0; i < all.length; i++)
+        for (let j = i + 1; j < all.length; j++)
+          nearest = Math.min(nearest, Math.hypot(all[i].x - all[j].x, all[i].y - all[j].y));
+      return nearest;
+    };
+    expect(far()).toBeGreaterThan(200);
+    /* and putting them all back does not pile them up again */
+    bus.send(ROOM, { cmd: "home" });
+    expect(far()).toBeGreaterThan(200);
   });
 
   it("lets a board beep and be heard by its neighbour", () => {

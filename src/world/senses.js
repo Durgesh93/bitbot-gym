@@ -63,6 +63,15 @@ export function sample(env, body, probes) {
       case "sound":
         out[p.name] = env.soundAt(at, { self: body.id });
         break;
+      /* A VECTOR, not a number. Every other probe comes back as one
+         quantity because that is all a light sensor or a microphone can
+         tell you, but a magnetometer has three axes and the whole point
+         of a compass is WHICH WAY the field points, so the field itself
+         is what crosses over and the board resolves it onto its own
+         axes. */
+      case "magnetic":
+        out[p.name] = env.magneticAt(at, { z: p.z || 0 });
+        break;
       default:
         throw new Error("there is no such probe as a " + p.kind);
     }

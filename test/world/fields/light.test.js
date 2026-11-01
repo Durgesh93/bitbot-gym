@@ -43,11 +43,15 @@ describe("the light field", () => {
   it("is dark with the lamp off and bright with it on, once the field is told", () => {
     const { scene, light } = build({ lamps: [{ x: 1000, y: 1000, kind: "ceiling", on: false }] });
     const spot = { x: 1000, y: 1400 };
-    const dark = light.at(spot, eye(0));
+    /* what the EYE really reads, bounce and all: the room's own reflected
+       light is most of what a sensor sees away from the lamp, so leaving it
+       out here would be testing something no robot ever measures */
+    const sees = f => ({ z: EYE_Z, normal: normalFrom(f, EYE_TILT) });
+    const dark = light.at(spot, sees(0));
 
     scene.lamps[0].on = true;        // what the world does when a child flicks the switch
     light.stale();
-    const lit = light.at(spot, eye(0));
+    const lit = light.at(spot, sees(0));
 
     expect(dark).toBeLessThan(0.1);
     expect(lit).toBeGreaterThan(2);
@@ -177,10 +181,17 @@ describe("the light field", () => {
      inverse-square law, which is the only way the picture and the sensor
      readings are guaranteed to agree. These tests are that guarantee. */
   describe("the profile it hands the renderer", () => {
+    /* THE PROFILE IS ONE LAMP'S OWN LIGHT and nothing else: no shadows,
+       because the renderer cuts those out as polygons, and no bounce,
+       because the bounce belongs to the whole room rather than to this lamp
+       and is laid down once underneath every glow. So it is compared
+       against the field asked the same way. */
+    const beam = { z: 0, shadows: false, bounce: false };
+
     it("starts at what a sensor would read under the lamp", () => {
       const { light } = build({ lamps: [{ x: 1000, y: 1000, kind: "ceiling" }] });
       const r = light.regions()[0];
-      expect(r.profile.e[0]).toBeCloseTo(light.at({ x: 1000, y: 1000 }, { z: 0 }), 6);
+      expect(r.profile.e[0]).toBeCloseTo(light.at({ x: 1000, y: 1000 }, beam), 6);
     });
 
     it("falls away at the rate the field itself falls away", () => {
@@ -189,7 +200,7 @@ describe("the light field", () => {
       const step = r.profile.reach / (r.profile.e.length - 1);
       for (const k of [1, 3, 6]) {
         /* due east of the lamp, where nothing stands in the way */
-        const here = light.at({ x: 1000 + step * k, y: 1000 }, { z: 0 });
+        const here = light.at({ x: 1000 + step * k, y: 1000 }, beam);
         expect(r.profile.e[k]).toBeCloseTo(here, 2);
       }
     });

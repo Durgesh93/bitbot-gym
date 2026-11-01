@@ -18,7 +18,8 @@ import { createScreen } from "./screen.js";
    straight up and its microphone hears from everywhere. */
 export const PROBES = [
   { name: "screenLight", kind: "light", fwd: 0, side: 0, z: 42 },   // normal omitted: straight up
-  { name: "mic", kind: "sound", fwd: 0, side: 0, z: 42 }
+  { name: "mic", kind: "sound", fwd: 0, side: 0, z: 42 },
+  { name: "field", kind: "magnetic", fwd: 0, side: 0, z: 42 }
 ];
 
 /* The LEDs double as a light meter, and `light level` is 0 to 255 - a
@@ -33,26 +34,52 @@ export function lightLevel(e) {
    DOWN, some 72 degrees below horizontal. Only the small horizontal part,
    around 15 uT, is any use for finding north - which is the honest reason a
    compass is so easily upset, and worth saying to a class that has just
-   watched one swing about. */
+   watched one swing about.
+
+   THE WORLD OWNS THE REAL FIELD, in world/fields/magnetic.js, because the
+   room may well have magnets lying in it and then the field is a different
+   thing in every square of the floor. This copy is only what a board
+   assumes when nobody hands it one, which happens in unit tests and
+   nowhere else. A test keeps the two in step. */
 export const FIELD = { total: 50.5, inclination: 72, declination: 3 };
 
+/* The Earth alone, as a vector in room coordinates, microtesla, z upwards.
+   North is up the screen, swung round by the declination. */
+function earthOnly() {
+  const incl = FIELD.inclination * Math.PI / 180;
+  const H = FIELD.total * Math.cos(incl);
+  const a = -Math.PI / 2 + FIELD.declination * Math.PI / 180;
+  return { x: H * Math.cos(a), y: H * Math.sin(a), z: -FIELD.total * Math.sin(incl) };
+}
+
 /* Heading in degrees, 0 = north, clockwise. On the canvas north is up, so a
-   robot facing up the screen has heading -90 degrees in canvas angles. */
-export function compassHeading(h) {
-  const deg = (h * 180 / Math.PI + 90 - FIELD.declination) % 360;
+   robot facing up the screen has heading -90 degrees in canvas angles.
+
+   NORTH IS WHEREVER THE FIELD HERE POINTS, not wherever the pole is. That
+   is not a simplification, it is what a compass does - and it is why a
+   magnet on the desk sends one round in a circle. */
+export function compassHeading(h, field) {
+  const B = field || earthOnly();
+  const flat = Math.hypot(B.x, B.y);
+  /* Straight above a magnet the field can point almost vertically, and a
+     compass with no horizontal field to work with does not read north -
+     it reads whatever it likes. Hold the last sensible thing: zero. */
+  if (flat < 1e-6) return 0;
+  const north = Math.atan2(B.y, B.x);
+  const deg = ((h - north) * 180 / Math.PI) % 360;
   return Math.round((deg + 360) % 360);
 }
 
-/* What the three axes read, in microtesla, for a board lying flat. */
-export function magneticForce(h, axis) {
-  const incl = FIELD.inclination * Math.PI / 180;
-  const H = FIELD.total * Math.cos(incl);          // horizontal, about 15 uT
-  const Z = FIELD.total * Math.sin(incl);          // vertical, about 48 uT, downwards
-  const t = compassHeading(h) * Math.PI / 180;
-  if (axis === "x") return Math.round(-H * Math.sin(t) * 1000) / 1000;
-  if (axis === "y") return Math.round(H * Math.cos(t) * 1000) / 1000;
-  if (axis === "z") return Math.round(Z * 1000) / 1000;
-  return Math.round(FIELD.total * 1000) / 1000;
+/* What the three axes read, in microtesla, for a board lying flat. `x` is
+   out to the board's right, `y` is straight ahead of it and `z` is down
+   through it; with no axis, the strength of the whole field. */
+export function magneticForce(h, axis, field) {
+  const B = field || earthOnly();
+  const round = v => Math.round(v * 1000) / 1000;
+  if (axis === "x") return round(-Math.sin(h) * B.x + Math.cos(h) * B.y);
+  if (axis === "y") return round(Math.cos(h) * B.x + Math.sin(h) * B.y);
+  if (axis === "z") return round(-B.z);
+  return round(Math.hypot(B.x, B.y, B.z));
 }
 
 /* One board. Everything a program can see or change about it lives in here,
@@ -108,11 +135,13 @@ export function createBoard(spec) {
       state.light = lightLevel(senses.screenLight || 0);
       state.sound = clamp(Math.round(senses.mic || 0), 0, 255);
       const h = body ? body.h || 0 : 0;
+      const B = senses.field || null;
+      state.field = B;
       return {
         light: state.light,
         sound: state.sound,
-        compass: compassHeading(h),
-        magnet: magneticForce(h),
+        compass: compassHeading(h, B),
+        magnet: magneticForce(h, undefined, B),
         buttonA: state.buttons.A ? 1 : 0,
         buttonB: state.buttons.B ? 1 : 0,
         logo: state.buttons.logo ? 1 : 0

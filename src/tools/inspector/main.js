@@ -11,7 +11,6 @@
 
 import { bus } from "../../core/bus.js";
 import { createRoom, ROOM } from "../../app/room.js";
-import { SCENE_NAMES } from "../../world/scenes/index.js";
 import { createRoomRenderer } from "../../room/renderer.js";
 import { normalFrom, UP } from "../../world/fields/light.js";
 
@@ -118,8 +117,6 @@ function buildSwitches() {
   }
 }
 
-el("scene").innerHTML = SCENE_NAMES.map(n => '<option value="' + n + '">' + n + "</option>").join("");
-el("scene").onchange = e => { bus.post(ROOM, { cmd: "scene", name: e.target.value }); probe = null; };
 el("addbot").onclick = () => bus.post(ROOM, { cmd: "add" });
 el("rays").onchange = e => { showRays = e.target.checked; };
 

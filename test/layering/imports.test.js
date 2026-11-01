@@ -13,16 +13,21 @@ import { join, relative, dirname, resolve, sep } from "node:path";
 
 const RULES = {
   core:     [],                                 // imports nothing of ours at all
-  hardware: ["core"],
-  world:    ["core", "hardware"],
-  api:      ["core", "hardware"],
-  app:      ["core", "hardware", "world", "api"],
+  /* somebody else's code, copied in verbatim. It is below even core: it
+     imports nothing, knows nothing about the gym, and the only reason it
+     is a folder rather than a dependency is written at the top of the
+     file in it. Anyone may reach it, like any library. */
+  vendor:   [],
+  hardware: ["core", "vendor"],
+  world:    ["core", "hardware", "vendor"],
+  api:      ["core", "hardware", "vendor"],
+  app:      ["core", "hardware", "world", "api", "vendor"],
   /* ui may reach the renderer: it is a view too, and a canvas painted
      sixty times a second is not something React should be doing. It may
      NOT reach the world or the hardware. */
-  ui:       ["core", "app", "room", "world/scenes"],
-  room:     ["core", "app"],
-  tools:    ["core", "hardware", "world", "api", "app", "room"]   // dev tools: rulers, not the gym
+  ui:       ["core", "app", "room", "world/scenes", "vendor"],
+  room:     ["core", "app", "vendor"],
+  tools:    ["core", "hardware", "world", "api", "app", "room", "vendor"]   // dev tools: rulers, not the gym
 };
 
 const SRC = resolve(__dirname, "../../src");

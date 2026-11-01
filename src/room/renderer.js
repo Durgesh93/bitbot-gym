@@ -25,6 +25,16 @@ const FLOOR = 0.1;             // how dark the PICTURE may get; see paintLight
 let ctx = null;                // the canvas being drawn on, and mm -> px
 let S = 1;                     // (module-level so the ported art can see them)
 
+/* EVERY LABEL IN THE ROOM, AS BOXES, FOR THE FRAME BEING DRAWN.
+
+   The names are one pass and the sensor captions are another, and each
+   used to lay itself out knowing only about its own kind - so at eight
+   robots a tidy column of names sat squarely underneath a tidy column of
+   readings, with "Bit:Bot 1" hidden behind somebody else's "sonar 154 cm".
+   Both passes push into this one list, names first, and both step round
+   what is already in it. */
+let labelBoxes = [];
+
 function roundRect(x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
@@ -35,6 +45,74 @@ function shade(hex, amount) {
   const n = parseInt(String(hex).slice(1), 16);
   const f = c => clamp(Math.round(c + amount * 255), 0, 255);
   return "rgb(" + f((n >> 16) & 255) + "," + f((n >> 8) & 255) + "," + f(n & 255) + ")";
+}
+
+/* THE FLOOR IS A MATERIAL, NOT A COLOUR.
+
+   A flat grey rectangle reads as a diagram; speckled lino reads as a
+   room, and the difference costs one offscreen canvas. It matters more
+   than it sounds: the whole point of the gym is that a child believes the
+   room enough to reason about it, and a believable floor is most of that.
+
+   Built once per material and reused, because a texture regenerated every
+   frame would crawl and shimmer - and because sixty of these a second
+   would be the most expensive thing in the renderer by a distance. */
+const floors = new Map();
+
+function floorOf(material, W) {
+  const key = material + ":" + W;
+  if (floors.has(key)) return floors.get(key);
+
+  const px = 512;
+  const c = document.createElement("canvas");
+  c.width = c.height = px;
+  const g = c.getContext("2d");
+  /* its own random, seeded by the material, so a floor looks the same
+     every time the gym opens */
+  let seed = 0;
+  for (let i = 0; i < material.length; i++) seed = (seed * 31 + material.charCodeAt(i)) | 0;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+
+  if (material === "grass") {
+    g.fillStyle = "#6f8a5c"; g.fillRect(0, 0, px, px);
+    for (let i = 0; i < 5200; i++) {                      // blades, two ways
+      const x = rnd() * px, y = rnd() * px, l = 2 + rnd() * 5;
+      g.strokeStyle = rnd() < 0.5 ? "rgba(120,150,96,0.55)" : "rgba(78,102,64,0.5)";
+      g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rnd() - 0.5) * 2, y - l); g.stroke();
+    }
+  } else if (material === "tarmac") {
+    g.fillStyle = "#6d7079"; g.fillRect(0, 0, px, px);
+    for (let i = 0; i < 9000; i++) {                      // chippings
+      const v = rnd();
+      g.fillStyle = v < 0.5 ? "rgba(90,94,103,0.55)" : "rgba(55,58,65,0.45)";
+      g.fillRect(rnd() * px, rnd() * px, 1 + rnd() * 2, 1 + rnd() * 2);
+    }
+  } else if (material === "sand") {
+    g.fillStyle = "#c6b089"; g.fillRect(0, 0, px, px);
+    for (let i = 0; i < 9000; i++) {
+      g.fillStyle = rnd() < 0.5 ? "rgba(214,196,160,0.5)" : "rgba(170,148,112,0.45)";
+      g.fillRect(rnd() * px, rnd() * px, 1 + rnd() * 1.6, 1 + rnd() * 1.6);
+    }
+  } else {
+    /* lino, which is what a primary classroom floor really is: one
+       continuous speckled sheet. NO TILE JOINTS - a grid of lines on the
+       floor reads as graph paper, and a child who sees squares starts
+       counting them and measuring the room in them. The speckle alone is
+       enough to say "floor"; the squares were saying "diagram". */
+    g.fillStyle = "#a7b0a4"; g.fillRect(0, 0, px, px);
+    for (let i = 0; i < 14000; i++) {                     // the speckle
+      const v = rnd();
+      g.fillStyle = v < 0.45 ? "rgba(184,192,180,0.45)"
+                  : v < 0.8  ? "rgba(152,161,148,0.4)"
+                             : "rgba(128,137,125,0.35)";
+      g.fillRect(rnd() * px, rnd() * px, 1 + rnd() * 2, 1 + rnd() * 2);
+    }
+  }
+
+  const pat = ctx.createPattern(c, "repeat");
+  floors.set(key, pat);
+  return pat;
 }
 
 function drawThingDetail(b) {
@@ -177,6 +255,53 @@ function drawThingDetail(b) {
   ctx.restore();
 }
 
+/* A BAR MAGNET, red end north, pale end south, lying where it was put.
+   Drawn small and flat because that is what it is - and drawn with its
+   two ends obviously different, because which way round it lies is the
+   whole of what it does to a compass. */
+const MAG_LONG = 96, MAG_WIDE = 34;
+function drawMagnet(M) {
+  const L = MAG_LONG * S, W = MAG_WIDE * S;
+  ctx.save();
+  ctx.translate(M.x * S, M.y * S);
+  ctx.rotate(M.rot || 0);
+
+  ctx.save();                                   // it sits on the floor
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.ellipse(2, 3, L * 0.55, W * 0.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  const r = Math.min(5 * S, W / 2);
+  const round = (x, w, fill) => {
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(x, -W / 2, w, W, r)
+                  : ctx.rect(x, -W / 2, w, W);
+    ctx.fill();
+  };
+  round(-L / 2, L / 2 + 1, "#c9ced8");          // south, pale
+  round(0, L / 2, "#d14b45");                   // north, red
+  ctx.strokeStyle = "rgba(20,24,32,0.45)";
+  ctx.lineWidth = Math.max(1, 1.2 * S);
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(-L / 2, -W / 2, L, W, r)
+                : ctx.rect(-L / 2, -W / 2, L, W);
+  ctx.stroke();
+
+  const f = Math.round(W * 0.62);
+  ctx.font = "700 " + f + "px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#fff";
+  ctx.fillText("N", L * 0.25, 0);
+  ctx.fillStyle = "#3b4250";
+  ctx.fillText("S", -L * 0.25, 0);
+  ctx.restore();
+}
+
 function drawBulb(L) {
   const x = L.x * S, y = L.y * S, r = 15 * S;
   if (L.on) {
@@ -220,10 +345,54 @@ function drawSun(sun, w) {
   ctx.textAlign = "left";
 }
 
+/* A MICRO:BIT LYING ON THE FLOOR, on its own, with no wheels under it.
+
+   Drawn as the board really looks from above - the long edge, the two
+   buttons either side of the screen and the gold teeth along the bottom -
+   because a child has one of these in their hand and has to see that the
+   thing on the screen is the same object. The nose still points the way it
+   faces: a bare board has a compass, and which way it is lying is the
+   whole of the compass lesson. */
+function drawBoard(b) {
+  const x = b.x * S, y = b.y * S, r = b.r * S;
+  const w = r * 1.6, h = r * 1.25;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(b.h || 0);
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.4)"; ctx.shadowBlur = 6 * S; ctx.shadowOffsetY = 2 * S;
+  roundRectPath(-w / 2, -h / 2, w, h, r * 0.22);
+  ctx.fillStyle = b.held ? "#7e7a3d" : "#1f6f4a";          // the green board
+  ctx.fill();
+  ctx.restore();
+  /* the gold edge connector, along the leading edge */
+  ctx.fillStyle = "#c9a227";
+  for (let i = -2; i <= 2; i++) ctx.fillRect(w / 2 - r * 0.2, i * h * 0.17 - h * 0.05, r * 0.2, h * 0.09);
+  /* the 5x5 window and the two buttons */
+  ctx.fillStyle = "rgba(10,12,16,0.75)";
+  ctx.fillRect(-w * 0.16, -h * 0.26, w * 0.32, h * 0.52);
+  ctx.fillStyle = "#cfd6e4";
+  ctx.beginPath(); ctx.arc(-w * 0.3, 0, r * 0.13, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(w * 0.3, 0, r * 0.13, 0, 7); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.28)"; ctx.lineWidth = 1.2;
+  roundRectPath(-w / 2, -h / 2, w, h, r * 0.22); ctx.stroke();
+  ctx.restore();
+}
+
+function roundRectPath(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);         ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
 /* A Bit:Bot from above: the chassis, two wheels and a nose so you can see
    which way it is pointing. The full one, with its FireLeds and its screen,
    arrives with the hardware layer. */
 function drawBody(b) {
+  const bare = b.program && b.program.plugged === false;
+  if (bare) return drawBoard(b);
   const x = b.x * S, y = b.y * S, r = b.r * S;
   ctx.save();
   ctx.translate(x, y);
@@ -243,11 +412,88 @@ function drawBody(b) {
   ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.lineWidth = 1.4;
   ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.stroke();
   ctx.restore();
-  ctx.fillStyle = "rgba(255,255,255,0.75)";
+}
+
+/* THE NAMES, LAID OUT SO THEY CAN ALL BE READ.
+
+   The name over each one, and not the number, because the name is what the
+   teacher says out loud. Drawn in one pass at the end rather than by each
+   body as it goes down, for the reason you find out with the fourth robot:
+   a classroom start corner puts them close together, the labels are a fixed
+   size however near the robots are, and two names on top of each other is
+   worse than no name at all. So each one is nudged down until it is clear
+   of the ones already placed. */
+function drawNames(bodies, W) {
   ctx.font = "bold " + Math.round(11 * S * 8) + "px system-ui, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(String(b.id), x, y - r - 6);
+  labelBoxes = [];
+  const placed = [];
+  /* The pill is 14 high, so a nudge of 13 left the two of them touching -
+     one step has to clear the whole label and leave a hairline. */
+  const lift = 7, step = 20;
+  /* The pills have rounded ends and the eye joins two that are only just
+     apart, so the clash test is widened by one: labels that merely touch
+     read as one long smear of grey, which is the thing this is for. */
+  const BREATH = 10;
+  /* Top to bottom, so a nudge is always downwards onto empty floor and the
+     order does not change as the robots shuffle about. */
+  for (const b of [...bodies].sort((p, q) => p.y - q.y)) {
+    const name = (b.program && b.program.name) || String(b.id);
+    const w = ctx.measureText(name).width + 8;
+    /* HELD INSIDE THE GLASS. A robot near the left wall had its name drawn
+       centred on it, so half of "Bit:Bot 4" was off the edge of the room
+       and unreadable - which is the one thing a name is for. */
+    const x = Math.max(w / 2 + 2, Math.min(b.x * S, W - w / 2 - 2));
+    let y = (b.y - b.r) * S - lift;
+    for (let tries = 0; tries < 20; tries++) {
+      const clash = placed.some(q => Math.abs(q.x - x) < (q.w + w) / 2 + BREATH &&
+                                     Math.abs(q.y - y) < step);
+      if (!clash) break;
+      y += step;                       // down the body rather than off the top of the room
+    }
+    placed.push({ x, y, w });
+    labelBoxes.push({ x: x, y: y - 11, w: w, h: 14 });
+    ctx.fillStyle = "rgba(10,13,20,0.5)";
+    roundRectPath(x - w / 2, y - 11, w, 14, 4); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.88)";
+    ctx.fillText(name, x, y);
+  }
   ctx.textAlign = "left";
+}
+
+/* THE TURN POINT.
+
+   Two points to a thing and no more: the thing itself, which you drag to
+   move it, and one dot out to its right, which you drag to turn it. Copy
+   and delete used to be two more dots; they are on the right-click menu
+   now, because four dots round every chair in a furnished room was more
+   dots than room.
+
+   Only drawn while the pointer is in drag mode - in any other mode the
+   pointer means something else and a handle under it would be a trap. */
+const TURN_OUT = 52;                   // how far beyond the edge the dot sits
+
+export function turnPointOf(thing) {
+  if (thing.body) {
+    const b = thing.body;
+    return { x: b.x + Math.cos(b.h || 0) * (b.r + TURN_OUT),
+             y: b.y + Math.sin(b.h || 0) * (b.r + TURN_OUT) };
+  }
+  const f = thing.thing;
+  const cx = f.x + f.w / 2, cy = f.y + f.h / 2;
+  const out = Math.max(f.w, 110) / 2 + TURN_OUT;
+  return { x: cx + Math.cos(f.rot || 0) * out, y: cy + Math.sin(f.rot || 0) * out };
+}
+
+const TURN_DOT = 30;                   // the dot's own size, in room units
+function drawTurnPoint(p) {
+  const x = p.x * S, y = p.y * S, r = TURN_DOT * S;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 7);
+  ctx.fillStyle = "rgba(91,192,235,0.20)"; ctx.fill();
+  ctx.strokeStyle = "rgba(91,192,235,0.85)"; ctx.lineWidth = 1.6; ctx.stroke();
+  /* a little arrowed arc, so the dot says "turn" and not "press" */
+  ctx.beginPath(); ctx.arc(x, y, r * 0.5, 0.7, 5.0);
+  ctx.lineWidth = 1.8; ctx.stroke();
 }
 
 /* WHERE IT HAS JUST BEEN.
@@ -333,9 +579,9 @@ function drawRadio(snap) {
    turn left here?", "why does it stop in front of nothing?", "why does my
    compass say east?".
 
-   THEY COMBINE. Light, magnetic and sonar are three toggles and any of
-   them can be on at once, because a robot is reading all three at once
-   anyway; "Plain" is simply all of them off. Making them exclusive, as a
+   THEY COMBINE. Light and sonar are both toggles and either can be on at
+   once, because a robot is reading both at once anyway; "Plain" is simply
+   all of them off. Making them exclusive, as a
    row of radio buttons, quietly says they are alternatives, and they are
    not.
 
@@ -369,7 +615,7 @@ function bubble(text, x, y, colour, W) {
    lines are stacked underneath it, so three views at once read as three
    rows rather than three captions on top of each other. */
 function drawOverlay(snap, show, W, probe) {
-  if (!show.light && !show.magnetic && !show.sonar) return;
+  if (!show.light && !show.sonar) return;
   const said = new Map();
   const add = (b, text, colour) => {
     if (!said.has(b)) said.set(b, []);
@@ -402,31 +648,6 @@ function drawOverlay(snap, show, W, probe) {
            + (r.lightL === r.lightR ? "level" : r.lightL > r.lightR ? "left brighter"
                                                                    : "right brighter"),
           "#ffd76a");
-    }
-  }
-
-  if (show.magnetic) {
-    /* Thin, faint and everywhere, because that is the honest picture: the
-       Earth's field does not care where you stand. A child who sees the
-       SAME line in every square has learnt that a compass reading changing
-       means the robot turned, not that it moved. Drawn quietly on purpose -
-       it is a backdrop to the room, not a thing in it. */
-    const step = W / 10, len = step * 0.26;
-    const dx = Math.cos(MAG_NORTH) * len, dy = Math.sin(MAG_NORTH) * len;
-    ctx.strokeStyle = "rgba(91,192,235,0.26)";
-    ctx.lineWidth = 1.3;
-    ctx.beginPath();
-    for (let y = step / 2; y < W; y += step) {
-      for (let x = step / 2; x < W; x += step) {
-        ctx.moveTo(x - dx, y - dy);
-        ctx.lineTo(x + dx, y + dy);
-      }
-    }
-    ctx.stroke();
-    for (const b of snap.bodies) {
-      const r = b.reads || {};
-      if (r.compass == null) continue;
-      add(b, "compass " + Math.round(r.compass) + "\u00b0", "#5bc0eb");
     }
   }
 
@@ -466,16 +687,55 @@ function drawOverlay(snap, show, W, probe) {
     }
   }
 
-  /* the captions, stacked under whatever they belong to */
+  /* THE CAPTIONS, STACKED UNDER WHATEVER THEY BELONG TO - AND THE STACKS
+     LAID OUT AGAINST EACH OTHER.
+
+     Stacking the rows within one robot's stack was only half the job. Turn
+     all three views on in a class of ten and each robot is carrying four
+     lines of text that are a fixed size however close together the robots
+     are; two robots a hand's breadth apart put eight lines in the same
+     place and you can read none of them. So a whole stack is measured and
+     pushed down past the stacks already placed, exactly the way the names
+     are - top to bottom, so the push is always onto emptier floor. */
   const gap = 17 * (W / 620);
-  said.forEach((items, b) => {
-    let y = (b.y + b.r + 14) * S;
-    for (const it of items) { bubble(it.text, b.x * S, y, it.colour, W); y += gap; }
+  const cf = Math.round(11 * (W / 620));            // the same size `bubble` uses
+  ctx.font = "600 " + cf + "px system-ui, sans-serif";
+  const stacks = [...said.entries()].map(([b, items]) => {
+    const w = Math.max(...items.map(it => ctx.measureText(it.text).width)) + cf * 1.1;
+    const h = (items.length - 1) * gap + cf * 1.9;
+    return {
+      items: items, w: w, h: h,
+      /* held inside the glass, the same as the names: a stack centred on a
+         robot by the wall hangs half of itself off the room */
+      x: Math.max(w / 2 + 2, Math.min(b.x * S, W - w / 2 - 2)),
+      y: (b.y + b.r + 14) * S,
+      /* and if there is no floor left underneath - the legend lives along
+         the bottom - it goes above the robot instead */
+      roof: (b.y - b.r) * S - 6
+    };
   });
+  /* The flip is decided BEFORE the stacks are laid out against each other
+     and not after: flipping one up at the end dropped it on top of
+     whatever was already up there, which is the mess this pass exists to
+     prevent. */
+  for (const st of stacks) if (st.y + st.h > W - 34) st.y = Math.max(2, st.roof - st.h);
+  stacks.sort((p, q) => p.y - q.y);
+  /* starting from the names, which are already on the glass */
+  const down = labelBoxes.slice();
+  for (const st of stacks) {
+    for (let tries = 0; tries < 40; tries++) {
+      const clash = down.find(q => Math.abs(q.x - st.x) < (q.w + st.w) / 2 + 6 &&
+                                   st.y < q.y + q.h + 4 && q.y < st.y + st.h + 4);
+      if (!clash) break;
+      st.y = clash.y + clash.h + 5;
+    }
+    down.push(st);
+    let y = st.y;
+    for (const it of st.items) { bubble(it.text, st.x, y, it.colour, W); y += gap; }
+  }
 
   const on = [];
   if (show.light) on.push("light sensors, 0 to 1023");
-  if (show.magnetic) on.push("compass and field, the same everywhere");
   if (show.sonar) on.push("a 15\u00b0 cone of pings, red found nothing");
   const note = "Showing: " + on.join("   \u00b7   ");
   const f = Math.round(12 * (W / 620));
@@ -521,6 +781,8 @@ export function createRoomRenderer(canvas, probe) {
   function peak(snap) {
     let top = snap.ambient;
     for (const r of snap.light) if (r.profile.e[0] > top) top = r.profile.e[0];
+    const g = snap.indirect;
+    if (g) for (let i = 0; i < g.s.length; i++) if (g.s[i] > top) top = g.s[i];
     return top;
   }
 
@@ -570,9 +832,19 @@ export function createRoomRenderer(canvas, probe) {
       }
     }
 
-    octx.save();                                        // and punch out the ending shadows
+    /* AND PUNCH OUT THE ENDING SHADOWS, all the way through.
+
+       This used to leave a tenth of the light in, because taking all of it
+       out left a black polygon that read as a HOLE IN THE FLOOR rather than
+       as a shadow. That tenth was a lie told to the eye: a shadow in a real
+       room is not an absence of light, it is a place the lamp cannot reach
+       that the walls and the floor still bounce light into - and the gym
+       now works out how much, properly, and paints it underneath. So the
+       hole can be a real hole: what shows through it is the room's own
+       bounced light, the same grid a light sensor reads. */
+    octx.save();
     octx.globalCompositeOperation = "destination-out";
-    octx.fillStyle = "#000";
+    octx.fillStyle = "rgba(0,0,0,1)";
     for (const poly of region.quads) {
       if (!poly || poly.length < 3) continue;
       octx.beginPath();
@@ -583,8 +855,51 @@ export function createRoomRenderer(canvas, probe) {
     }
     octx.restore();
 
+    /* A HAIR OF BLUR ON THE WAY IN, and it is the single thing that stops
+       the room looking like cut paper. A lamp is a bulb and not a point,
+       so its shadow has a soft edge a few centimetres wide; the geometry
+       we clip against is exact, so without this every shadow has the edge
+       of a razor. Blurring the finished layer rather than each polygon
+       costs one filtered draw a lamp and softens the lit edge too. */
     lctx.globalCompositeOperation = "lighter";
+    lctx.filter = "blur(" + (2.6 * (W / 620)).toFixed(2) + "px)";
     lctx.drawImage(one, 0, 0);
+    lctx.filter = "none";
+  }
+
+  /* THE ROOM'S OWN BOUNCED LIGHT, drawn from the grid the sensors read.
+
+     This is what fills a shadow. It is a coarse grid on purpose - indirect
+     light has no edges in it, every surface it touched averaged it - so it
+     goes down as a tiny bitmap and the canvas smooths it up to size, which
+     is the same bilinear read the field does for a sensor. The picture and
+     the numbers come from one array, which is the only way they can never
+     disagree. */
+  const tiny = document.createElement("canvas");
+  const tctx = tiny.getContext("2d");
+  function paintIndirect(snap, W, top) {
+    const g = snap.indirect;
+    if (!g || !g.G) return;
+    const G = g.G;
+    if (tiny.width !== G) { tiny.width = tiny.height = G; }
+    const img = tctx.createImageData(G, G);
+    for (let i = 0; i < G * G; i++) {
+      const v = Math.round(255 * clamp(look(g.s[i] / 2, top), 0, 1));
+      img.data[i * 4] = v;
+      img.data[i * 4 + 1] = Math.round(v * 0.97);
+      img.data[i * 4 + 2] = Math.round(v * 0.91);
+      img.data[i * 4 + 3] = 255;
+    }
+    tctx.putImageData(img, 0, 0);
+    lctx.save();
+    lctx.globalCompositeOperation = "lighter";
+    lctx.imageSmoothingEnabled = true;
+    lctx.imageSmoothingQuality = "high";
+    /* half a cell out on every side, so the outermost cell centres land on
+       the edge of the room rather than half a cell inside it */
+    const pad = W / (2 * G);
+    lctx.drawImage(tiny, -pad, -pad, W + pad * 2, W + pad * 2);
+    lctx.restore();
   }
 
   function paintLight(snap, S, W) {
@@ -599,6 +914,7 @@ export function createRoomRenderer(canvas, probe) {
     const a = Math.round(255 * clamp(Math.max(FLOOR, look(snap.ambient, top)), 0, 1));
     lctx.fillStyle = "rgb(" + a + "," + Math.round(a * 0.97) + "," + Math.round(a * 0.91) + ")";
     lctx.fillRect(0, 0, W, W);
+    paintIndirect(snap, W, top);
     for (const region of snap.light) paintSource(region, S, W, snap, top);
     return lit;
   }
@@ -615,9 +931,7 @@ export function createRoomRenderer(canvas, probe) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, W);
 
-    ctx.fillStyle = snap.ground === "grass" ? "#6f8a5c"
-                  : snap.ground === "tarmac" ? "#6d7079"
-                  : snap.ground === "sand" ? "#c6b089" : "#9aa0ac";
+    ctx.fillStyle = floorOf(snap.ground || "lino", W);
     ctx.fillRect(0, 0, W, W);
 
     for (const l of snap.lines) {                               // tape on the floor
@@ -731,8 +1045,18 @@ export function createRoomRenderer(canvas, probe) {
       ctx.restore();
     }
 
+    /* under the lamps and the robots: a magnet is a thing on the floor
+       and a robot can be standing on top of one */
+    for (const M of (snap.magnets || [])) drawMagnet(M);
     for (const L of snap.lamps) drawBulb(L);
     for (const b of snap.bodies) drawBody(b);
+    drawNames(snap.bodies, W);
+
+    /* the turn points, over everything so they are never buried */
+    if (o.handles) {
+      for (const f of snap.furniture) drawTurnPoint(turnPointOf({ thing: f }));
+      for (const b of snap.bodies) drawTurnPoint(turnPointOf({ body: b }));
+    }
     if (snap.sun) drawSun(snap.sun, W);
 
     const nr = 20 * (W / 620), nx = W - 46 * (W / 620), ny = 46 * (W / 620);

@@ -196,6 +196,11 @@ export function createMachine(opts) {
     run, stop, reset, release, fire,
     plug(on) { plugged = !!on; return plugged; },
     plugged: () => plugged,
+    name: () => ctx.name(),
+    /* The one mutable word about a board. The log tags every line with the
+       name as it reads it, so old lines keep the old name and new ones get
+       the new one, which is what a child watching the log expects. */
+    rename(to) { o.name = String(to); board.name = o.name; return o.name; },
     setReads(fn) { latest = fn; },
     isBeeping: () => ctx.isBeeping(),
     state: () => state,

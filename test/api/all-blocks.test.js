@@ -163,9 +163,13 @@ describe("the quirks of the real hardware", () => {
 
   it("gives 0 from the sonar when nothing is within 2 m, and says so", () => {
     /* "nothing there" and "touching my nose" are both small numbers, so
-       `if sonar < 15` is true in an empty room. */
-    const open = createRoom({ bus: createBus(), scene: "outdoor", seed: 5 });
-    const id = open.handle({ cmd: "add", x: 1500, y: 1500, heading: -Math.PI / 2 });
+       `if sonar < 15` is true in an empty room.
+
+       DOWN THE DIAGONAL, because it is the only line in a two-metre room
+       longer than the sonar can see: corner to corner is 2.8m, and the
+       first thing along it is better than two metres off. */
+    const open = createRoom({ bus: createBus(), scene: "classroom", seed: 5 });
+    const id = open.handle({ cmd: "add", x: 1850, y: 1850, heading: -3 * Math.PI / 4 });
     open.tick();
     expect(open.machine(id).api.bitbot.sonar("cm")).toBe(0);
     expect(recent().some(l => /watch out for "if sonar < 15"/.test(l.msg))).toBe(true);

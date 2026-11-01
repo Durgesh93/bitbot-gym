@@ -143,7 +143,12 @@ export function describeEnvironmentContract(label, data) {
       const mid = env.size / 2;
       env.setEmitters([{ owner: 1, x: mid, y: mid }]);
       const mine = env.soundAt({ x: mid, y: mid }, { self: 1 });
-      const theirs = env.soundAt({ x: mid, y: mid }, { self: 2 });
+      /* Where a neighbour can actually BE. Two boards cannot share a spot
+         on the floor, and asking what the field says at nought millimetres
+         asks for one over nought: the sound field is now a real wave and
+         it answers that question with a very large number, not with the
+         255 a board reports when the buzzer is its own. */
+      const theirs = env.soundAt({ x: mid + 250, y: mid }, { self: 2 });
       expect(mine).toBeGreaterThan(theirs);
     });
 

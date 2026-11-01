@@ -22,6 +22,7 @@
    work indoors and outdoors with no change at all. */
 
 import { TAU, hull, pointInPoly, boxCorners, boxCentre } from "../../core/geom.js";
+import { prepare, illuminate, sample, ROOM_HEIGHT } from "./transport.js";
 import { compute as visibilityFrom, inPolygon } from "visibility-polygon";
 
 const D2R = Math.PI / 180;
@@ -40,7 +41,6 @@ export const UP = { x: 0, y: 0, z: 1 };
 export function createLight(scene, bodies) {
   let sources = [];        // the point and directional ones
   let ambient = 0;
-  let bounce = [];
   let shadows = [];        // one entry per source: [{poly, owner}]
   let dirty = true;
 
@@ -64,9 +64,7 @@ export function createLight(scene, bodies) {
         z: L.z == null ? LAMP_Z[L.kind] : L.z,
         I: L.I == null ? LAMP_I[L.kind] : L.I
       });
-      /* A ceiling panel floods a whole room, so some of it arrives from
-         everywhere at once; a torch does not. */
-      if (L.kind === "ceiling") ambient += L.ambient == null ? 0.28 : L.ambient;
+      if (L.ambient) ambient += L.ambient;     // a scene may still add its own
     });
 
     if (scene.sun) {
@@ -163,25 +161,11 @@ export function createLight(scene, bodies) {
     return false;
   }
 
-  /* Each lit object throws a little of that light back into the room: a
-     whiteboard brightens the wall beside it, a black backpack does not. */
-  function buildBounce() {
-    bounce = [];
-    for (const bx of scene.furniture) {
-      const r = bx.reflect == null ? 0.4 : bx.reflect;
-      if (r < 0.05) continue;
-      const o = boxCentre(bx);
-      const e = direct(o.x, o.y, 0, null, bx);
-      if (e < 0.02) continue;
-      const face = Math.max(bx.w * bx.h, 2 * (bx.w + bx.h) * (bx.z || 100));
-      bounce.push({ x: o.x, y: o.y, I: r * e * 0.35 * Math.min(1.6, face / 3e5) });
-    }
-  }
-
-  /* Straight from the sources, with no bounce - which is also what the bounce
-     pass itself needs, or it would chase its own tail. */
+  /* Straight from the sources: no ambient and no bounce. Both of those are
+     worked out FROM this, so neither may be in it or the room would light
+     itself from its own glow, round and round. */
   function direct(x, y, z, normal, self, noShadow) {
-    let e = ambient;
+    let e = 0;
     for (let i = 0; i < sources.length; i++) {
       const src = sources[i];
       let aim = 1;
@@ -207,10 +191,83 @@ export function createLight(scene, bodies) {
     return e;
   }
 
+  /* THE ROOM LIGHTS ITSELF, and it does it by bouncing off its own surfaces.
+
+     What was here before was a guess with two bugs in it. Each object threw
+     back a single glow from its own centre, which has no idea which way it
+     is facing: it shone out of the shadow it was itself casting and lit the
+     floor underneath itself. Measured on a table between two lamps, every
+     scrap of light in the shadow was the table's own bounce and the shadow
+     kept two thirds of the open-floor reading. The ambient beside it was a
+     flat 0.28 for a ceiling panel and NOTHING for a floor lamp, so a room
+     lit by two standing lamps had an ambient of 0.004 - and the only thing
+     stopping its shadows being black holes was the bug above.
+
+     Now the room is cut into patches - floor, ceiling, four walls, every
+     face of every table - the light that reaches each one is worked out,
+     and they throw it at each other until it settles, with a ray between
+     every pair that decides whether they can see each other at all. See
+     transport.js. A face cannot light what it cannot see, so a table cannot
+     light its own shadow, and the grey in a shadow is now the room's walls
+     and floor, which is where it comes from in life.
+
+     IT IS BUILT FROM THE FURNITURE AND THE LAMPS, NOT THE ROBOTS. A solve
+     is tens of milliseconds and a robot moves sixty times a second; a
+     95 mm robot also contributes nothing anyone could measure to the glow
+     of a room. So the bake is keyed on the things that matter and is left
+     alone while robots drive about - which is the difference between this
+     being affordable and not. */
+  let indirect = null;
+  let prep = null;
+  let shapedFor = "", litFor = "";
+
+  /* TWO KEYS, because the two halves cost wildly different amounts. The
+     shape of the room - which decides every ray - changes when furniture
+     moves. What the lamps are doing changes far more often and costs
+     almost nothing to redo. Neither key mentions the robots: a 95 mm robot
+     adds nothing to the glow of a room that anyone could measure, and a
+     solve per frame of a drag is not affordable. */
+  function shapeKey() {
+    let k = scene.size + "|" + scene.ground.material + "|" + (scene.sun ? "sun" : "-") +
+            "|" + (scene.sky.walls == null ? 0.5 : scene.sky.walls);
+    for (const f of scene.furniture)
+      k += "|F" + Math.round(f.x) + "," + Math.round(f.y) + "," + f.w + "," + f.h +
+           "," + (f.z || 0) + "," + (f.rot || 0).toFixed(3) + "," + f.reflect;
+    return k;
+  }
+  function lampKey() {
+    let k = ambient.toFixed(6);
+    for (const L of scene.lamps)
+      k += "|L" + L.x + "," + L.y + "," + L.kind + "," + (L.on ? 1 : 0) +
+           "," + (L.I == null ? "" : L.I) + "," + (L.z == null ? "" : L.z);
+    if (scene.sun) k += "|S" + scene.sun.azimuth + "," + scene.sun.elevation + "," + scene.sun.I;
+    return k;
+  }
+
+  function buildIndirect() {
+    const shape = shapeKey();
+    if (shape !== shapedFor) {
+      shapedFor = shape; litFor = "";
+      prep = prepare(scene, {
+        ground: scene.ground.reflect == null ? 0.25 : scene.ground.reflect,
+        walls: scene.sky.walls == null ? 0.5 : scene.sky.walls,
+        thing: bx => (bx.reflect == null ? 0.4 : bx.reflect)
+      }, scene.furniture.map(f => ({ box: f, owner: f })),
+         { indoor: !scene.sun, height: ROOM_HEIGHT, grid: 14, z: 40 });
+    }
+    const lamps = lampKey();
+    if (lamps === litFor) return;
+    litFor = lamps;
+    /* what lands on each patch straight from the lamps, its own body not
+       counted as something standing in its way */
+    indirect = illuminate(prep,
+      p => ambient + direct(p.x, p.y, p.z, { x: p.nx, y: p.ny, z: p.nz }, p.owner), 4);
+  }
+
   function rebuild() {
     gather();
     buildShadows();
-    buildBounce();
+    buildIndirect();
     profiles = null;
     dirty = false;
   }
@@ -222,7 +279,9 @@ export function createLight(scene, bodies) {
      how the two quietly drift apart, and it forgets the bounce off the
      furniture entirely. Sixteen directions averaged, with nothing in the way:
      the shadows are drawn as polygons on top, so counting them in here too
-     would darken them twice. */
+     would darken them twice. The bounce is left out for the same reason and
+     a better one: it is not this lamp's, it is the whole room's, and the
+     renderer lays it down once underneath every glow. */
   const PROFILE_STEPS = 12;
   let profiles = null;
   function profile(i) {
@@ -237,7 +296,7 @@ export function createLight(scene, bodies) {
       for (let a = 0; a < 16; a++) {
         const th = a * TAU / 16;
         sum += at({ x: src.x + Math.cos(th) * d, y: src.y + Math.sin(th) * d },
-                  { z: 0, shadows: false });
+                  { z: 0, shadows: false, bounce: false });
       }
       /* A glow cannot brighten further from the lamp. It can in the samples,
          because the bounce off a table is only on the table's side, and a
@@ -262,13 +321,8 @@ export function createLight(scene, bodies) {
     const o = opts || {};
     const z = o.z == null ? 0 : o.z;
     const normal = o.normal === undefined ? UP : o.normal;
-    let e = direct(p.x, p.y, z, normal, o.self, o.shadows === false);
-    if (o.bounce !== false) {
-      for (const B of bounce) {
-        const dx = B.x - p.x, dy = B.y - p.y;
-        e += B.I / ((dx * dx + dy * dy) / 1e6 + 0.3);
-      }
-    }
+    let e = ambient + direct(p.x, p.y, z, normal, o.self, o.shadows === false);
+    if (o.bounce !== false) e += sample(indirect, p.x, p.y, normal);
     return e;
   }
 
@@ -276,6 +330,9 @@ export function createLight(scene, bodies) {
     at, rebuild,
     stale() { dirty = true; },
     ambient: () => { if (dirty) rebuild(); return ambient; },
+    /* The baked indirect, for the renderer: the SAME grid the sensors read,
+       so the grey in a drawn shadow is the grey a light sensor reports. */
+    indirect: () => { if (dirty) rebuild(); return indirect; },
     sources: () => { if (dirty) rebuild(); return sources.slice(); },
     shadows: () => { if (dirty) rebuild(); return shadows; },
     /* flat list for the renderer: every shadow it has to draw, and the lit

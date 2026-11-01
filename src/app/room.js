@@ -56,17 +56,128 @@ export function createRoom(options) {
   const kit = new Map();
   const problems = [];      // posts that went nowhere or blew up, for the log
 
-  function open(name) {
+  /* WHO IS IN THE ROOM SURVIVES THE ROOM.
+
+     Changing scene used to empty it: ten robots, ten names a class had
+     chosen, ten transferred programs, gone because a teacher wanted to
+     show the line track for two minutes. A room is the floor and the
+     furniture; the children's robots are not part of it, and carrying
+     them through is what every one of them expects.
+
+     What crosses: the name, the program, the board's own state and the
+     squint that makes its two eyes differ. What does not: where it was
+     standing, because that was a place in a room that no longer exists -
+     each one is set down at the new scene's start and walked out until it
+     has elbow room. Anything actually RUNNING is stopped on the way
+     through, with its code still loaded, so nothing is left driving across
+     a floor it has never seen and nothing is left waiting on a pause that
+     the restarted clock has moved out of reach. A robot that was only
+     sitting there is left alone: telling a child their robot was
+     "stopped" when it never ran is a small lie on a card they trust. */
+  function open(name, keepRobots) {
     const data = SCENES[name];
     if (!data) throw new Error("there is no scene called " + name);
+
+    const carried = [];
+    if (keepRobots && env) {
+      for (const [id, k] of kit) {
+        const was = env.bodyOf(id);
+        const doing = k.machine.state();
+        if (doing === "run" || doing === "wait") k.machine.stop(true);
+        carried.push({ id: id, kit: k,
+                       r: was ? was.r : BOARD_RADIUS, z: was ? was.z : 95 });
+      }
+    }
+
     sceneName = name;
     env = createEnvironment(data);
-    kit.clear();
+    if (!carried.length) { kit.clear(); nextId = 1; }
     emitters = [];
-    nextId = 1;
     random.reseed(seed);
     resetClock();
+
+    const spots = env.starts();
+    carried.forEach((c, i) => {
+      const at = clearOf(spots[i % spots.length] || spots[0], c.r);
+      env.addBody({ id: c.id, x: at.x, y: at.y,
+                    h: at.heading == null ? 0 : at.heading, r: c.r, z: c.z });
+      /* the encoders count the difference between two ticks, and this one
+         teleported; and "put it back at the start" means the new start */
+      c.kit.pose = null;
+      c.kit.start = { x: at.x, y: at.y, h: at.heading == null ? 0 : at.heading };
+    });
     return env;
+  }
+
+  /* TWO KINDS OF THING GO IN THE ROOM, and the difference is the whole
+     first lesson: a MICRO:BIT is the brain, and it can sit on the floor on
+     its own doing screen, buttons, compass and radio; a BIT:BOT is that
+     same brain in a body with wheels, eyes and a sonar. Plugging one into
+     the other is a command, so a child can take the board off mid lesson
+     and watch the `bitbot` blocks start refusing.
+
+     They are named apart on purpose - Bit:Bot 1, 2, 3 and micro:bit A, B,
+     C - because "pass me micro:bit C" has to pick out one thing in a room
+     of ten, and a number next to a number does not. */
+  const BOARD_RADIUS = 40;                       // a bare micro:bit, lying on the floor
+  const READING_ROOM = 170;                      // enough space apart to read their labels
+
+  /* Somewhere near `at` with nothing already standing in it.
+
+     A ROW, THE WAY A TEACHER LINES THEM UP. It used to ring outwards from
+     the start, eight places round each ring, which fills evenly in open
+     space and knots up badly in the one place it is always used: a scene
+     names a handful of start poses and the classroom names ONE, in a
+     corner, so four robots ended up in a huddle with half the ring's
+     places out through the wall. Marching across the room instead, and
+     wrapping to the next row at the far side, puts them in a line - and a
+     line is both what a class of ten actually looks like on the floor and
+     the one arrangement whose labels cannot overlap.
+
+     TWO PITCHES, TRIED IN ORDER, and the first is about reading rather
+     than about bumping. Sixty millimetres apart is enough that two robots
+     are not touching and nowhere near enough that you can read them: each
+     wears its name above it and, with the sensor views on, three more
+     lines below, and those labels are a fixed size however close the
+     robots are. So the first pass asks for room to be READ in, and only
+     when the room has genuinely run out does it fall back to room to
+     stand in. */
+  function clearOf(at, r) {
+    const spot = { ...at };
+    if (!at) return spot;
+    const size = env.size;
+    const place = (gap) => {
+      const free = (x, y) => env.bodies().every(b =>
+        Math.hypot(b.x - x, b.y - y) > b.r + r + gap);
+      if (free(spot.x, spot.y)) return { ...at };
+      const pitch = r * 2 + gap + 10;
+      /* the margin is the LABELS' and not the body's: a robot hard against
+         the wall has nowhere to draw its name */
+      const edge = r + (gap > 60 ? 130 : 10);
+      const inside = v => v > edge && v < size - edge;
+      /* away from whichever wall the start pose is nearest */
+      const stepX = spot.x < size / 2 ? pitch : -pitch;
+      const stepY = spot.y < size / 2 ? pitch : -pitch;
+      for (let row = 0; row < 10; row++) {
+        const y = spot.y + stepY * row;
+        if (!inside(y)) break;
+        for (let col = 0; col < 14; col++) {
+          const x = spot.x + stepX * col;
+          if (!inside(x)) break;
+          if ((row || col) && free(x, y)) return { ...at, x: x, y: y };
+        }
+      }
+      return null;
+    };
+    return place(READING_ROOM) || place(60) || spot;
+  }
+
+  function nextName(kind) {
+    const taken = n => [...kit.values()].some(k => k.machine.name() === n);
+    if (kind === "bitbot") { let n = 1; while (taken("Bit:Bot " + n)) n++; return "Bit:Bot " + n; }
+    let i = 0;
+    while (taken("micro:bit " + String.fromCharCode(65 + i))) i++;
+    return "micro:bit " + String.fromCharCode(65 + i);
   }
 
   /* Put a body down somewhere sensible: the scene's own start poses first,
@@ -74,20 +185,28 @@ export function createRoom(options) {
   function add(spec) {
     const s = spec || {};
     const starts = env.starts();
-    const at = s.x != null ? s : (starts[kit.size % starts.length] || starts[0]);
     const id = s.id == null ? nextId++ : s.id;
-    const board = createBoard({ id: id, name: s.name || ("micro:bit " + id) });
+    const kind = s.kind === "microbit" ? "microbit" : "bitbot";
+    const r = s.r == null ? (kind === "bitbot" ? bitbot.CHASSIS.radius : BOARD_RADIUS) : s.r;
+    /* A scene names a handful of start spots and a class has ten boards, so
+       after the fourth they land on each other - which looks like one robot
+       and is two, and the child who presses Play watches the wrong one.
+       Walk outwards from the spot until there is room. */
+    const at = s.x != null ? s : clearOf(starts[kit.size % starts.length] || starts[0], r);
+    const name = s.name || nextName(kind);
+    const board = createBoard({ id: id, name: name });
     const chassis = createChassis();
     const machine = createMachine({
-      id: id, name: s.name || ("micro:bit " + id),
+      id: id, name: name,
       board: board, chassis: chassis,
       now: () => clock.now,
       reads: () => { const got = senses.get(id); return got ? got.reads : {}; },
       temperature: () => env.mediumAt().airTemp,
       radio: wireFor(id)
     });
+    machine.plug(kind === "bitbot");
     kit.set(id, {
-      device: s.device || "bitbot",
+      device: kind,
       /* this robot's own small squint, fixed for its whole life, so its two
          eyes never read exactly the same and a light-chaser can choose */
       trim: s.trim == null ? random.int(-6, 6) : s.trim,
@@ -99,7 +218,7 @@ export function createRoom(options) {
     return env.addBody({
       id: id,
       x: at.x, y: at.y, h: at.heading == null ? 0 : at.heading,
-      r: s.r == null ? bitbot.CHASSIS.radius : s.r,
+      r: r,
       z: s.z == null ? 95 : s.z
     });
   }
@@ -164,7 +283,8 @@ export function createRoom(options) {
   function handle(msg) {
     const m = msg || {};
     switch (m.cmd) {
-      case "scene":   return open(m.name).name;
+      /* The robots come with it. See `open`. */
+      case "scene":   return open(m.name, true).name;
       case "add":     return add(m).id;
       case "remove":  kit.delete(m.id); return env.removeBody(m.id);
 
@@ -176,6 +296,29 @@ export function createRoom(options) {
          drain, between ticks, which is exactly where a hand lands. */
       case "thing":     return env.addThing(m.name, m.x, m.y, m.rot, m.centred);
       case "unthing":   return env.removeThingAt({ x: m.x, y: m.y });
+      /* One named thing, rather than whatever happens to be under the
+         pointer: a drag has to keep hold of the chair it started on. */
+      case "moveThing": return env.moveThing(m.uid, m.x, m.y, m.centred);
+      case "turnThing": return env.turnThing(m.uid, m.rot);
+      case "copyThing": return env.copyThing(m.uid, m.dx, m.dy);
+      case "dropThing": return env.removeThing(m.uid);
+      case "addLamp":   return env.addLamp(m.x, m.y, m.kind).uid;
+      case "addSpeaker": { const sp = env.addSpeaker(m.x, m.y); return sp ? sp.uid : null; }
+      case "moveLamp":  return env.moveLamp(m.id, m.x, m.y);
+      case "dropLamp":  return env.removeLamp(m.id);
+      case "addMagnet": return env.addMagnet(m.x, m.y, m.rot).uid;
+      case "moveMagnet": return env.moveMagnet(m.id, m.x, m.y);
+      case "turnMagnet": return env.turnMagnet(m.id, m.rot);
+      case "dropMagnet": return env.removeMagnet(m.id);
+      /* Another board the same as this one, set down beside it and ready
+         for its own program. The code is deliberately NOT copied: two
+         robots running the same thing is a lesson, not a default. */
+      case "copy": {
+        const k = kit.get(m.id);
+        const b = find(m.id);
+        if (!k || !b) return null;
+        return add({ kind: k.device, x: b.x + 150, y: b.y + 90, heading: b.h }).id;
+      }
       case "furnish":   return env.furnish(m.count, m.seed).length;
       case "empty":     return env.clearThings();
       case "line":      return env.addLine(m.from, m.to, m.width);
@@ -183,15 +326,52 @@ export function createRoom(options) {
       case "clearFloor": return env.clearLines();
       case "catalogue": return env.catalogue();
 
+      /* ---- robot settings ---------------------------------------------
+         MEASURE YOUR OWN BIT:BOT ONCE AND SET THESE, and the gym stops
+         lying to you. They are deliberately one set for every robot, not
+         one per robot: they describe the hardware and the floor the class
+         actually has, and ten robots that each drove differently would
+         make every lesson unrepeatable. Battery is the exception the real
+         world forces - it is per chassis - so setting it sets them all,
+         which is what a trolley of robots charged together looks like. */
+      case "tuning": return {
+        top: bitbot.MOTOR.top, dead: bitbot.MOTOR.dead, mismatch: bitbot.MOTOR.mismatch,
+        grip: env.grip(), lightUp: bitbot.SENSOR.lightUp,
+        battery: kit.size ? [...kit.values()][0].chassis.battery() : 100
+      };
+      case "tune": {
+        if (m.top != null) bitbot.MOTOR.top = m.top;
+        if (m.dead != null) bitbot.MOTOR.dead = m.dead;
+        if (m.mismatch != null) bitbot.MOTOR.mismatch = m.mismatch;
+        if (m.grip != null) env.setGrip(m.grip);
+        if (m.lightUp != null) bitbot.SENSOR.lightUp = !!m.lightUp;
+        if (m.battery != null) for (const k of kit.values()) k.chassis.battery(m.battery);
+        return handle({ cmd: "tuning" });
+      }
+      /* "what is under my finger?" - the one question the pointer has to
+         ask the world rather than answer from the snapshot, because only
+         the world knows a turned chair's real corners. */
+      case "whatAt":    return env.thingAt({ x: m.x, y: m.y });
+
       /* "Put the robot back" - to where this scene says a robot starts. With
          no id it puts them all back, which is the one a teacher presses when
          ten of them have ended up in a corner. */
+      /* PUT THEM ALL BACK, SIDE BY SIDE AND NOT ON TOP OF EACH OTHER. A
+         scene names a handful of start spots - the classroom names ONE -
+         so this sent every robot in the room to the same square
+         millimetre, which looks like one robot and is ten. Each is walked
+         out from the spot until it has room to be read, the same as when
+         it was first put in. */
       case "home": {
         const spots = env.starts();
         const ids = m.id == null ? [...kit.keys()] : [m.id];
         ids.forEach((id, i) => {
-          const at = spots[i % spots.length] || { x: 400, y: 1600, heading: 0 };
-          env.placeBody(id, at.x, at.y, at.heading);
+          const aim = spots[i % spots.length] || { x: 400, y: 1600, heading: 0 };
+          const b = env.bodyOf(id);
+          /* out of the way first, or it finds itself standing there */
+          if (b) env.placeBody(id, -9000, -9000, b.h);
+          const at = clearOf(aim, b ? b.r : BOARD_RADIUS);
+          env.placeBody(id, at.x, at.y, at.heading == null ? 0 : at.heading);
         });
         return ids.length;
       }
@@ -257,7 +437,29 @@ export function createRoom(options) {
                       k.machine.reset();
                       if (k.start) env.placeBody(m.id, k.start.x, k.start.y, k.start.h);
                       return true; }
-      case "plug":  { const k = kit.get(m.id); return k ? k.machine.plug(m.on) : false; }
+      /* Taking the board off is not just a flag: the thing in the room is a
+         different size now, and the sonar of the robot beside it has to
+         find that out. */
+      case "plug": {
+        const k = kit.get(m.id);
+        if (!k) return false;
+        const on = k.machine.plug(m.on);
+        k.device = on ? "bitbot" : "microbit";
+        env.resizeBody(m.id, on ? bitbot.CHASSIS.radius : BOARD_RADIUS);
+        return on;
+      }
+      /* Names are the child's, not ours, and they have to stay unique or
+         "look at micro:bit C" stops meaning anything. */
+      case "rename": {
+        const k = kit.get(m.id);
+        if (!k) return null;
+        const want = String(m.name || "").trim().slice(0, 18);
+        if (!want) return k.machine.name();
+        for (const [other, o] of kit) {
+          if (other !== m.id && o.machine.name() === want) return k.machine.name();
+        }
+        return k.machine.rename(want);
+      }
       case "stopAll": { for (const k of kit.values()) k.machine.stop(true); return true; }
 
       /* A hand holding the buzzer on, as opposed to a program doing it.
@@ -338,14 +540,19 @@ export function createRoom(options) {
     senses.clear();
     for (const b of env.bodies()) {
       const own = kit.get(b.id);
-      const dev = own && DEVICES[own.device];
-      if (!dev) continue;
-      const raw = sample(env, b, dev.PROBES.concat(microbit.PROBES));
+      if (!own) continue;
+      /* A BARE MICRO:BIT HAS NO CHASSIS, so it has no chassis probes and no
+         chassis readings - no eyes, no line sensors, no sonar. That is not
+         a special case bolted on; it is the lesson. A board lying on the
+         floor feels light, sound, its own buttons and the compass, and
+         nothing else, and the card shows exactly that much. */
+      const dev = DEVICES[own.device] || null;
+      const raw = sample(env, b, dev ? dev.PROBES.concat(microbit.PROBES) : microbit.PROBES);
       senses.set(b.id, {
         senses: raw,
         /* the chassis half and the board half, in one object, because a
            child's card does not care which circuit board a number came off */
-        reads: { ...dev.read(raw, own.trim), ...own.board.read(raw, b) },
+        reads: { ...(dev ? dev.read(raw, own.trim) : {}), ...own.board.read(raw, b) },
         screen: own.board.screen.cells(),
         board: own.board.state()
       });
@@ -377,6 +584,7 @@ export function createRoom(options) {
       const k = kit.get(b.id);
       const prog = k ? { state: k.machine.state(), stopwatch: k.machine.stopwatch(),
                          plugged: k.machine.plugged(), armed: k.machine.armed().length,
+                         name: k.machine.name(), kind: k.device,
                          pixels: k.chassis.state().pixels, model: k.chassis.model() } : null;
       return got ? { ...b, senses: got.senses, reads: got.reads,
                      screen: got.screen, board: got.board, program: prog } : b;

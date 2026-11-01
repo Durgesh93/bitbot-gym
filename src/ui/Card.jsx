@@ -24,10 +24,10 @@
    up, not by scrolling. Compact is not less honest - it is the same
    snapshot, fewer of its fields. */
 
-import React from "react";
-import { Screen, Meter, Eyes, Sonar, Line, Compass, Pixels, Pill } from "./parts.jsx";
+import React, { useRef, useState } from "react";
+import { Screen, Meter, Eyes, Sonar, Line, Compass, Pixels, Pill, Field } from "./parts.jsx";
 
-export default function Card({ body, post, log, compact, onToggle }) {
+export default function Card({ body, post, log, compact, onToggle, onCode }) {
   const p = body.program || {};
   const r = body.reads || {};
   const state = p.state || "ready";
@@ -42,9 +42,51 @@ export default function Card({ body, post, log, compact, onToggle }) {
     onPointerLeave: () => send({ cmd: "press", button, down: false })
   });
 
+  /* THE NAME IS THE CHILD'S. Click it and type over it.
+
+     It was a `window.prompt` for about an hour, which looked like one line
+     of honest code and was a bug: prompt() is not supported in the app's
+     own browser and throws, so clicking the name did nothing at all. It is
+     not reliable in an installed PWA either. Nothing in the gym may depend
+     on it.
+
+     The half-typed name IS state, and it lives here, which is the one
+     exception to this card holding none: a draft is not the model, and
+     sending every keystroke to the room would make the room's name fight
+     the cursor. It commits on Enter or on leaving the box, and Escape
+     throws it away. */
+  const name = p.name || ("micro:bit " + body.id);
+  const [editing, setEditing] = useState(false);
+  const focused = useRef(null);        // the box we have already put the cursor in
+  const commit = (e) => { send({ cmd: "rename", name: e.target.value }); setEditing(false); };
+
   const head = (
     <div className="top">
-      <b>micro:bit {body.id}</b>
+      {editing
+        ? <input className="rename" defaultValue={name} maxLength={18}
+                 /* FOCUSED ONCE, when the box first appears.
+                    By hand rather than with autoFocus, which is quietly
+                    skipped when the document is not focused - and ONCE,
+                    because a ref callback runs on every render and this
+                    card re-renders sixty times a second off the snapshot.
+                    Selecting the text again each time meant the next
+                    keystroke replaced the one before it, so a name could
+                    only ever be one character long. React keeps the same
+                    DOM node across renders, so comparing it is enough. */
+                 ref={el => {
+                   if (!el || el === focused.current) return;
+                   focused.current = el; el.focus(); el.select();
+                 }}
+                 onBlur={commit}
+                 onKeyDown={e => {
+                   /* Enter COMMITS; it does not blur and hope. blur() does
+                      nothing at all when the box never got focus, and the
+                      name silently would not change. */
+                   if (e.key === "Enter") commit(e);
+                   if (e.key === "Escape") setEditing(false);   // unmounts, so no commit
+                 }} />
+        : <b className="naming" onClick={() => setEditing(true)}
+             title="click to give it a name">{name}</b>}
       <Pill state={state} />
       <span className="spacer" />
       <span className="ctime">{((p.stopwatch || 0) / 1000).toFixed(1)}s</span>
@@ -79,6 +121,7 @@ export default function Card({ body, post, log, compact, onToggle }) {
         <div className="run">
           <button className="go" onClick={() => send({ cmd: "run" })}>Play</button>
           <button onClick={() => send({ cmd: "stop" })}>Stop</button>
+          <button className="code" onClick={() => onCode(body.id)}>Code</button>
         </div>
       </div>
     );
@@ -88,10 +131,15 @@ export default function Card({ body, post, log, compact, onToggle }) {
     <div className={"card " + cls}>
       {head}
 
+      {/* CODE IS ON THE CARD, beside Play, because that is the order the
+          work happens in: this robot needs a program, so open the blocks
+          for THIS robot. Hunting for a board number in a dropdown on
+          another page was the step everybody got wrong. */}
       <div className="run">
         <button className="go" onClick={() => send({ cmd: "run" })}>Play</button>
         <button onClick={() => send({ cmd: "stop" })}>Stop</button>
         <button onClick={() => send({ cmd: "reset" })}>Reset</button>
+        <button className="code" onClick={() => onCode(body.id)}>Code</button>
       </div>
 
       {/* The two halves. Stacked in a normal card; side by side when an
@@ -105,6 +153,7 @@ export default function Card({ body, post, log, compact, onToggle }) {
             <div className="gauges">
               <Meter label="light" value={r.light} max={255} tone="warm" />
               <Meter label="sound" value={r.sound} max={255} tone="hot" />
+              <Field uT={r.magnet} />
               <Compass heading={r.compass} />
             </div>
           </div>
@@ -142,10 +191,10 @@ export default function Card({ body, post, log, compact, onToggle }) {
           : said.slice(-40).map(l => <div key={l.k} className={l.cls}>{l.msg}</div>)}
       </div>
 
+      {/* No "take the board off" any more. A thing in the room is a Bit:Bot
+          or it is a micro:bit, decided when it is put there - two kinds,
+          not one kind with a switch on it. */}
       <div className="press last">
-        <button onClick={() => send({ cmd: "plug", on: !p.plugged })}>
-          {p.plugged ? "take off the Bit:Bot" : "put it on a Bit:Bot"}
-        </button>
         <button className="quiet" onClick={() => send({ cmd: "remove" })}>remove</button>
       </div>
     </div>

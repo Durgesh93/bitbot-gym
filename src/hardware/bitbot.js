@@ -63,11 +63,24 @@ export function sonarCm(mm) {
    own small squint: no two LDRs ever match, and without it two eyes in a
    symmetrical spot read exactly the same and a light-chasing program sits
    there unable to choose. */
+/* WHICH WAY ROUND THE LIGHT SENSORS READ.
+
+   Ours give a bigger number for more light. Some boards are wired the
+   other way and give a bigger number for darker, and a class whose robots
+   disagree with the gym on this spends the lesson debugging the gym. One
+   setting, measured once against the real robot. */
+export const SENSOR = { lightUp: true };
+
+function eye(e, t) {
+  const v = clamp(ldr(e) + t, 0, 1023);
+  return SENSOR.lightUp ? v : 1023 - v;
+}
+
 export function read(senses, trim) {
   const t = trim || 0;
   return {
-    lightL: clamp(ldr(senses.lightL) + t, 0, 1023),
-    lightR: clamp(ldr(senses.lightR) - t, 0, 1023),
+    lightL: eye(senses.lightL, t),
+    lightR: eye(senses.lightR, -t),
     lineL: senses.lineL && senses.lineL.dark ? 1 : 0,
     lineR: senses.lineR && senses.lineR.dark ? 1 : 0,
     sonar: sonarCm(senses.sonar),

@@ -57,6 +57,38 @@ export function Meter({ label, value, max, tone, unit }) {
   );
 }
 
+/* ---- the magnetometer, in microtesla --------------------------------- */
+
+/* NOT A LINEAR BAR. A magnet's field falls off as one over the distance
+   CUBED, so this number runs from about 50 standing anywhere in the room
+   to a couple of thousand with the board sat on top of a magnet. A bar
+   that fitted the top of that range would show the Earth as one pixel,
+   and a bar that fitted the Earth would be pinned the moment a magnet
+   came out. So it is logarithmic, and it carries a tick where the Earth
+   alone sits - which turns the readout into the actual lesson: am I
+   above what the planet gives me, and by how much? */
+const FLOOR = 10, CEIL = 4000;
+const EARTH_UT = 50.5;
+const logPct = v => {
+  const c = Math.max(FLOOR, Math.min(CEIL, v || 0));
+  return (Math.log(c / FLOOR) / Math.log(CEIL / FLOOR) * 100).toFixed(1) + "%";
+};
+
+export function Field({ uT }) {
+  const v = uT == null ? 0 : uT;
+  const strong = v > EARTH_UT * 1.25;
+  return (
+    <div className="meter">
+      <span className="lab">magnet</span>
+      <span className="track">
+        <i className={strong ? "t-hot" : "t-cool"} style={{ width: logPct(v) }} />
+        <u className="earth" style={{ left: logPct(EARTH_UT) }} />
+      </span>
+      <span className="num">{v >= 1000 ? Math.round(v) : v.toFixed(1)} µT</span>
+    </div>
+  );
+}
+
 /* ---- the two light eyes, as a balance -------------------------------- */
 
 /* The one readout that earns its place. Both bars grow OUTWARD from the

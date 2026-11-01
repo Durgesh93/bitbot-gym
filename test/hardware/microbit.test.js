@@ -1,14 +1,23 @@
 import { describe, it, expect } from "vitest";
 import { createBoard, PROBES, lightLevel, compassHeading, magneticForce, FIELD }
   from "../../src/hardware/microbit.js";
+import { EARTH } from "../../src/world/fields/magnetic.js";
 
 describe("the micro:bit board", () => {
-  it("asks the world for only the two things it can actually sense", () => {
+  it("asks the world for only the three things it can actually sense", () => {
     /* It is a flat square of circuit board. It has no sonar and no line
        sensors - those are the chassis's, and a board in a child's hand has
-       neither. */
-    expect(PROBES.map(p => p.name)).toEqual(["screenLight", "mic"]);
+       neither. It does have a magnetometer, which is why the compass
+       works and why a magnet on the desk upsets it. */
+    expect(PROBES.map(p => p.name)).toEqual(["screenLight", "mic", "field"]);
     expect(PROBES.every(p => p.fwd === 0 && p.side === 0)).toBe(true);
+  });
+
+  it("keeps its idea of the Earth's field in step with the world's", () => {
+    /* The board carries a copy only for when nobody hands it a field. If
+       the two drift apart, a unit test here and the gym disagree about
+       which way north is, and nothing says so. */
+    expect(FIELD).toEqual(EARTH);
   });
 
   it("reads light on 0 to 255, not the chassis's 0 to 1023", () => {
