@@ -288,3 +288,35 @@ Quick, but worth doing after anything that touches the shell:
   **MAGNET** row falls back to about 50 µT, the Earth on its own.
 - There is no clock readout in the header and no room picker in the Room
   menu: one room, and the speed control is under **Clock**.
+
+## 19. Saving a room and opening it again
+
+This is the one a lesson leans on: if it half works, next week's class
+starts with a room that is nearly right, which is worse than an empty one.
+
+1. Build a room worth keeping: a Bit:Bot and a micro:bit, a table, a
+   magnet, a line on the floor, and a program loaded onto at least one
+   board. Note what the cards read - **LIGHT**, **SOUND**, **MAGNET**.
+2. **Rooms → Save this room to a file**, give it a name. A
+   `<name>.gym.json` lands in Downloads and the name appears in the
+   Rooms menu underneath.
+3. **Reload the page.** The room comes back empty, as it should.
+4. **Rooms → <name>**. Everything is back: both boards on their spots and
+   facing the way they faced, the table, the magnet, the line, the radio
+   groups, and **the code still on the board** - press Play and it runs.
+5. **The cards read the same three numbers as in step 1.** This is the
+   real check. A room that opens with the furniture right but SOUND at 50
+   instead of 0 is a different room, and the child's readings will not
+   match the lesson.
+6. **Save it again without touching anything, and open that.** Nothing
+   may creep: a thing that comes back half a box down and to the right
+   each time is a room that slowly falls apart over a term. The speaker
+   is the one to watch, because it is the one that goes in centred.
+7. **Open the same room twice in a row.** Still one of everything - not
+   two tables, two lamps and four robots.
+8. **Try opening something that is not a saved room** (any other `.json`,
+   or a `.hex`). A red strip under the header says so in a sentence a
+   teacher can act on, and the room that was already there is left alone.
+   The strip waits to be clicked away; the plain grey one that says
+   "opened ..." or "saved ..." goes by itself after a few seconds. Check
+   both in **dark mode** too - they are the only red thing in the shell.

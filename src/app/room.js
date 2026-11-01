@@ -321,6 +321,20 @@ export function createRoom(options) {
       }
       case "furnish":   return env.furnish(m.count, m.seed).length;
       case "empty":     return env.clearThings();
+      /* STRIP THE ROOM TO THE BARE FLOOR - no furniture, no lamps, no
+         speakers, no magnets, no lines. `empty` only takes out the
+         furniture, and a scene reopening brings its own lamp back with
+         it, so opening a saved project on top of either left the room
+         with the project's lamp AND the classroom's. A saved project
+         says exactly what is in the room; this is how it gets to. */
+      case "bare": {
+        env.clearThings();
+        env.clearLines();
+        const snapNow = env.snapshot();
+        for (let i = snapNow.lamps.length - 1; i >= 0; i--) env.removeLamp(i);
+        for (let i = snapNow.magnets.length - 1; i >= 0; i--) env.removeMagnet(i);
+        return true;
+      }
       case "line":      return env.addLine(m.from, m.to, m.width);
       case "erase":     return env.eraseLineAt({ x: m.x, y: m.y }, m.r);
       case "clearFloor": return env.clearLines();
@@ -431,6 +445,15 @@ export function createRoom(options) {
       /* A program: loaded, started, stopped, put back. One robot at a
          time, because each card has its own Play. */
       case "load":  { const k = kit.get(m.id); if (!k) return false; k.machine.load(m.code); return true; }
+      /* WHAT TO WRITE DOWN ABOUT THIS BOARD, for saving a project. Asked
+         for by hand rather than added to the snapshot, because a
+         snapshot is taken sixty times a second to draw the room and the
+         code on a board is the better part of a kilobyte of text that
+         the renderer has no use for. Saving happens once, when somebody
+         presses it. */
+      case "saved":  { const k = kit.get(m.id); if (!k) return null;
+                       return { name: k.machine.name(), kind: k.device,
+                                group: k.board.group(), code: k.machine.code() }; }
       case "run":   { const k = kit.get(m.id); if (!k) return false; k.machine.run(); return true; }
       case "stop":  { const k = kit.get(m.id); if (!k) return false; k.machine.stop(); return true; }
       case "reset": { const k = kit.get(m.id); if (!k) return false;

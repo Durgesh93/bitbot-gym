@@ -19,6 +19,8 @@
 import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { useRoom } from "./useRoom.js";
 import { say } from "../core/log.js";
+import { capture, restore, check } from "../app/project.js";
+import * as shelf from "../app/shelf.js";
 import RoomView from "./RoomView.jsx";
 import Card from "./Card.jsx";
 import BlocksTab from "./BlocksTab.jsx";
@@ -97,6 +99,30 @@ export default function App() {
     return m;
   }, [lines]);
 
+  /* AND THE LINES THAT ARE NOT ANY ROBOT'S. Splitting the log by board
+     left these with nowhere to go: "opened Dice Duel", "saved Dice Duel",
+     "that file is not a saved room" are all said by the GYM, not by a
+     robot, so every one of them was collected and then quietly dropped.
+     A teacher who opened the wrong file saw nothing happen at all, which
+     reads as a broken button rather than a refused file.
+
+     So they get a strip of their own under the header, newest only -
+     there is never more than one thing worth saying here, and a growing
+     column would be the shared stream coming back in. It fades after a
+     few seconds because it is a receipt, not a record; an error stays
+     until it is clicked away, because the one thing worse than no
+     message is a message that leaves before it is read. */
+  const [notice, setNotice] = useState(null);
+  useEffect(() => {
+    const mine = lines.filter(l => !(l.device && l.device.id != null));
+    if (!mine.length) return;
+    const last = mine[mine.length - 1];
+    setNotice(last);
+    if (last.cls === "err") return;                 // errors wait to be dismissed
+    const t = setTimeout(() => setNotice(n => (n === last ? null : n)), 6000);
+    return () => clearTimeout(t);
+  }, [lines]);
+
   const boards = snap.bodies || [];
   /* The editor points at a board, and a board can be taken out of the room
      while it is pointed at. Follow the room rather than remember a number
@@ -124,6 +150,90 @@ export default function App() {
     if (!src || !src.trim()) { say("there was no code to transfer", "err"); return; }
     ask({ cmd: "load", id, code: src });
   }, [ask]);
+
+  /* ---- saving the room, and opening it again ----------------------
+
+     A project is the room as a teacher arranged it: the furniture, the
+     lamps, the magnets, the line on the floor, and every board with its
+     name, its spot, its radio group and its code. Setting that up is most
+     of the cost of a lesson and almost none of it is the code - Dice Duel
+     wants two boards on the same group with a different program on each,
+     and doing that by hand in front of a class is five minutes and a
+     mistake. Saved once, opened in a second next week. */
+  const projectFile = React.useRef(null);
+  const [rooms, setRooms] = useState(() => { try { return shelf.list(); } catch (e) { return []; } });
+
+  /* Everything the room will not tell a snapshot. The code on a board is
+     asked for by hand rather than read off the snapshot, because a
+     snapshot is taken sixty times a second to draw the room. */
+  const captureNow = useCallback((name) => {
+    const snap = ask({ cmd: "snapshot" });
+    const saved = {};
+    for (const b of snap.bodies || []) {
+      const got = ask({ cmd: "saved", id: b.id });
+      if (got) saved[b.id] = got;
+    }
+    snap.tuning = ask({ cmd: "tuning" });
+    return capture(snap, saved, projects, name);
+  }, [ask, projects]);
+
+  const openProject = useCallback((p) => {
+    const bad = check(p);
+    if (bad) { say(bad, "err"); return; }
+    let plan;
+    try { plan = restore(p); }
+    catch (e) { say(e.message, "err"); return; }
+
+    /* OUT WITH WHAT IS THERE FIRST. A project says exactly what is in the
+       room, so anything left over is the last lesson's. The copy of the
+       list matters: removing walks the same array the room keeps. */
+    for (const b of [...(snap.bodies || [])]) post({ cmd: "remove", id: b.id });
+    for (const c of plan.room) post(c);
+
+    const fresh = {};
+    let first = null;
+    for (const b of plan.boards) {
+      const id = ask(b.add);
+      if (id == null) continue;
+      if (first == null) first = id;
+      if (b.group) post({ cmd: "group", id, group: b.group });
+      if (b.code) post({ cmd: "load", id, code: b.code });
+      /* and the blocks behind the code, so pressing Code shows the
+         lesson rather than an empty workspace */
+      if (b.editor) fresh[id] = b.editor;
+    }
+    setProjects(fresh);
+    if (first != null) setChosen(first);
+    say('opened "' + p.name + '"' + (plan.boards.length
+          ? " - " + plan.boards.length + (plan.boards.length === 1 ? " board" : " boards") + ", press Play"
+          : ""), "say");
+  }, [ask, post, snap]);
+
+  const saveToFile = useCallback(() => {
+    const name = window.prompt("What shall this room be called?", "my room");
+    if (name == null) return;
+    const p = captureNow(name);
+    const blob = new Blob([JSON.stringify(p, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = p.name.replace(/[^\w .-]+/g, " ").trim() + ".gym.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    /* and onto the shelf as well, so next week it is one press rather
+       than a trip through a file picker. The file is the one that
+       survives a reimaged laptop; this is the one that is quick. */
+    if (shelf.put(p)) setRooms(shelf.list());
+    say('saved "' + p.name + '"', "say");
+  }, [captureNow]);
+
+  const openFromFile = useCallback(async (file) => {
+    if (!file) return;
+    let p;
+    try { p = JSON.parse(await file.text()); }
+    catch (e) { say("that file is not a saved room", "err"); return; }
+    openProject(p);
+    if (check(p) === null && shelf.put(p)) setRooms(shelf.list());
+  }, [openProject]);
 
   /* The swipe needs to know which board to open on, and it is set up once,
      so it reads the latest list through a ref rather than closing over a
@@ -285,6 +395,33 @@ export default function App() {
                     hint="where it has just been">Trail</Item>
             </Menu>
 
+            {/* ROOMS, not "projects": what is saved is the room as it was
+                set up, and a teacher looking for last week's two-board
+                radio lesson is looking for a room. The file comes first
+                because it is the one that survives a new laptop; the
+                list under it is this browser's own copy, for speed. */}
+            <Menu label="Rooms" chip={rooms.length ? String(rooms.length) : null}>
+              <Item onClick={saveToFile} hint="a .gym.json you can keep or send on">
+                Save this room to a file
+              </Item>
+              <Item onClick={() => projectFile.current && projectFile.current.click()}
+                    hint="sets the whole room up again">Open a room file</Item>
+              {rooms.length > 0 && <Sep label="saved in this browser" />}
+              {rooms.map(r => (
+                <Item key={r.name} onClick={() => { const p = shelf.get(r.name); if (p) openProject(p); }}
+                      hint={r.saved ? new Date(r.saved).toLocaleDateString() : null}>
+                  {r.name}
+                </Item>
+              ))}
+              {rooms.length > 0 && (
+                <Item onClick={() => {
+                        const name = window.prompt("Forget which room? (its file is not touched)");
+                        if (name && shelf.remove(name)) setRooms(shelf.list());
+                      }}
+                      hint="only from this browser, never the file">Forget a saved room</Item>
+              )}
+            </Menu>
+
             <Menu label="Clock" chip={speed > 1 ? speed + "x" : (running ? null : "paused")}>
               <Row label="speed">
                 <select value={speed} onChange={e => setSpeed(Number(e.target.value))}>
@@ -296,6 +433,11 @@ export default function App() {
               </Item>
             </Menu>
         </MenuBar>
+
+        <input ref={projectFile} type="file" accept=".json,.gym.json,application/json" hidden
+               onChange={e => { const f = e.target.files && e.target.files[0];
+                                if (f) openFromFile(f);
+                                e.target.value = ""; }} />
 
         <span className="spacer" />
         <span className="where">{coding == null ? "the room" : "the blocks"}</span>
@@ -309,6 +451,14 @@ export default function App() {
           {theme === "dark" ? "\u2600" : "\u263d"}
         </button>
       </header>
+
+      {notice && (
+        <div className={"notice" + (notice.cls === "err" ? " bad" : "")}
+             onClick={() => setNotice(null)}
+             title="click to clear">
+          {notice.msg}
+        </div>
+      )}
 
       <main className="tab-room">
         <div className="left">

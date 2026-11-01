@@ -799,3 +799,17 @@ main.tab-room .left .roomview { flex: 1 1 auto; }
   border-radius: 1px;
 }
 .meter .track i.t-cool { background: linear-gradient(90deg, #5bc0eb, #7cd4f5); }
+
+/* WHAT THE GYM ITSELF SAYS - one line, under the header.
+   The robots each talk in their own card; this is for the handful of
+   things the gym says in its own voice, which is nearly all about
+   projects: opened, saved, or a file it will not take. Full width and
+   above the room because it is a receipt for something the teacher just
+   pressed, and they are looking at the top of the screen when they
+   press it. A plain one fades on its own; a red one waits. */
+.notice { margin: 0 14px 8px; padding: 8px 12px; border-radius: 10px;
+          background: var(--panel-2); border: 1px solid var(--line);
+          color: var(--fg); font-size: 13px; cursor: pointer; }
+.notice.bad { background: #fdeceb; border-color: #e7a9a3; color: #8a2419; }
+:root[data-theme="dark"] .notice.bad { background: #3a1c18; border-color: #6d2f27;
+                                       color: #ff9a9a; }
