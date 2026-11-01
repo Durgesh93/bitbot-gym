@@ -184,11 +184,26 @@ export default function App() {
     try { plan = restore(p); }
     catch (e) { say(e.message, "err"); return; }
 
-    /* OUT WITH WHAT IS THERE FIRST. A project says exactly what is in the
-       room, so anything left over is the last lesson's. The copy of the
-       list matters: removing walks the same array the room keeps. */
-    for (const b of [...(snap.bodies || [])]) post({ cmd: "remove", id: b.id });
-    for (const c of plan.room) post(c);
+    /* OPENING A PROJECT IS ONE ACT, SO IT IS ALL SENT AND NONE OF IT
+       POSTED. Posting is for a hand: a click lands on the next drain,
+       between ticks, which is where a hand belongs. This is not a hand,
+       it is a whole room arriving at once, and mixing the two broke it -
+       the room commands were POSTED and so drained later, while each
+       board was ADDED with a send and so arrived at once. The board went
+       down on its exact spot and then the queued `scene` reopened the
+       room underneath it and stood it on a default start spot instead.
+       Every project opened with its robots in the wrong place, and the
+       line course opened with the robot sitting beside its line.
+
+       It did not show up in the test because the test sends everything,
+       the way node has to. Now the gym does the same, so the test covers
+       the path the gym actually takes.
+
+       OUT WITH WHAT IS THERE FIRST: a project says exactly what is in
+       the room, so anything left over is the last lesson's. The copy of
+       the list matters - removing walks the same array the room keeps. */
+    for (const b of [...(snap.bodies || [])]) ask({ cmd: "remove", id: b.id });
+    for (const c of plan.room) ask(c);
 
     const fresh = {};
     let first = null;
@@ -196,8 +211,8 @@ export default function App() {
       const id = ask(b.add);
       if (id == null) continue;
       if (first == null) first = id;
-      if (b.group) post({ cmd: "group", id, group: b.group });
-      if (b.code) post({ cmd: "load", id, code: b.code });
+      if (b.group) ask({ cmd: "group", id, group: b.group });
+      if (b.code) ask({ cmd: "load", id, code: b.code });
       /* and the blocks behind the code, so pressing Code shows the
          lesson rather than an empty workspace */
       if (b.editor) fresh[id] = b.editor;
@@ -207,7 +222,7 @@ export default function App() {
     say('opened "' + p.name + '"' + (plan.boards.length
           ? " - " + plan.boards.length + (plan.boards.length === 1 ? " board" : " boards") + ", press Play"
           : ""), "say");
-  }, [ask, post, snap]);
+  }, [ask, snap]);
 
   const saveToFile = useCallback(() => {
     const name = window.prompt("What shall this project be called?", "my project");

@@ -125,12 +125,19 @@ describe("saving a room as a project", () => {
     expect(sam.kind).toBe("microbit");
     expect(sam.group).toBe(4);
 
-    /* and they stand where they stood, near enough that a child would say
-       it is the same room - the exact millimetre is matter.js's business */
-    const where = room.bodies().map(b => ({ x: b.x, y: b.y })).sort((a, b) => a.x - b.x);
-    expect(where[0].x).toBeGreaterThan(400);
-    expect(where[0].x).toBeLessThan(800);
-    expect(where[1].x).toBeGreaterThan(1200);
+    /* AND THEY STAND EXACTLY WHERE THEY STOOD. This was a loose range
+       check once, and a loose range check is what let a real bug
+       through: the gym opened a project by POSTING the room commands
+       and SENDING each board, so a board went down on its spot and the
+       queued `scene` then reopened the room under it and moved it to a
+       default start. The robot was still roughly in the room, so a
+       range passed; it was just no longer on its line. A spot saved is
+       a spot restored, to the millimetre. */
+    for (const b of p.boards) {
+      const back = room.bodies().find(x => x.x > b.x - 2 && x.x < b.x + 2 &&
+                                           x.y > b.y - 2 && x.y < b.y + 2);
+      expect(back, b.name + " is not on the spot it was saved at").toBeTruthy();
+    }
   });
 
   it("a board opened back up still runs its program", async () => {

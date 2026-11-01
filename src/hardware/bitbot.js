@@ -102,7 +102,13 @@ export function read(senses, trim) {
 export const MOTOR = {
   top: 450,        // mm/s at full tilt on a fresh battery
   dead: 15,        // below this percentage the robot does not move at all
-  mismatch: 3      // % the right motor runs faster than the left, as they always do
+  /* ZERO BY DEFAULT. Real motors are never twins and a real Bit:Bot does
+     curve when told to go straight - but a gym that curves out of the box
+     teaches the wrong lesson first. A child whose robot misses the line
+     has to be able to believe their own code. The slider is still there,
+     and turning it up to three or five is a good lesson of its own:
+     "why does the real one not go straight?" */
+  mismatch: 0      // % the right motor runs faster than the left; the slider adds it back
 };
 
 export function createChassis(spec) {
