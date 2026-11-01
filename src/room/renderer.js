@@ -99,13 +99,21 @@ function floorOf(material, W) {
        continuous speckled sheet. NO TILE JOINTS - a grid of lines on the
        floor reads as graph paper, and a child who sees squares starts
        counting them and measuring the room in them. The speckle alone is
-       enough to say "floor"; the squares were saying "diagram". */
-    g.fillStyle = "#a7b0a4"; g.fillRect(0, 0, px, px);
+       enough to say "floor"; the squares were saying "diagram".
+
+       Warm buff, chosen by the teacher over a pale grey, a blue-grey and
+       a slate. It is the one that looks like a school hall rather than a
+       diagram of one, which is the whole job of this texture. Keep it
+       LIGHT if it is ever changed again: the light field is multiplied
+       over the floor, so how dark a corner can get is whatever room the
+       floor's own brightness leaves it, and a dark floor flattens every
+       shadow the light sensors are there to find. */
+    g.fillStyle = "#d6c3a4"; g.fillRect(0, 0, px, px);
     for (let i = 0; i < 14000; i++) {                     // the speckle
       const v = rnd();
-      g.fillStyle = v < 0.45 ? "rgba(184,192,180,0.45)"
-                  : v < 0.8  ? "rgba(152,161,148,0.4)"
-                             : "rgba(128,137,125,0.35)";
+      g.fillStyle = v < 0.45 ? "rgba(232,221,200,0.45)"
+                  : v < 0.8  ? "rgba(199,184,158,0.4)"
+                             : "rgba(172,155,127,0.35)";
       g.fillRect(rnd() * px, rnd() * px, 1 + rnd() * 2, 1 + rnd() * 2);
     }
   }
