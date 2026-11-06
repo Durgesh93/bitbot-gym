@@ -98,29 +98,42 @@ export function carve(scene, want, height) {
      creeps as you cross the floor, and the field is no longer symmetric
      about a speaker standing in the middle of it. So take the asked-for
      size as a wish, and use whatever divides the room evenly. */
-  const ix = Math.max(4, Math.round(scene.size / want));
-  const cell = scene.size / ix;
+  /* `w`/`h` for a scene that has been through loadScene, `size` for a
+     bare literal - the tests and the yardstick below both build one. */
+  const RW = scene.w == null ? scene.size : scene.w;
+  const RH = scene.h == null ? (scene.size == null ? RW : scene.size) : scene.h;
+  const ix = Math.max(4, Math.round(RW / want));
+  const cell = RW / ix;
+  /* THE CELLS STAY SQUARE, so the depth of the room is whatever whole
+     number of them comes nearest. The width divides exactly, as it always
+     did; the depth can be out by up to half a cell, which at 60 mm cells
+     is 3 cm in a room two metres deep. That is deliberate: the wave
+     stencil below assumes a cube - one `cell`, one timestep, six equal
+     neighbours - and stretching the cells to make both sides divide
+     exactly would mean a different solver, for an error of under two per
+     cent in a diffuse field that ends up as a 0-255 microphone reading. */
+  const iy = Math.max(4, Math.round(RH / cell));
   const iz = Math.max(4, Math.round(height / cell));
   /* one ring of cells all the way round, so the hot loop never has to ask
      whether a neighbour exists - outside the room is simply solid */
-  const nx = ix + 2, ny = ix + 2, nz = iz + 2, N = nx * ny * nz;
+  const nx = ix + 2, ny = iy + 2, nz = iz + 2, N = nx * ny * nz;
   const sy = nx, sz = nx * ny;
   const at = (i, j, k) => ((k + 1) * ny + (j + 1)) * nx + (i + 1);
 
   const solid = new Uint8Array(N).fill(1);
   const skin = new Float32Array(N);              // admittance of whatever is out there
   for (let k = 0; k < iz; k++)
-    for (let j = 0; j < ix; j++)
+    for (let j = 0; j < iy; j++)
       for (let i = 0; i < ix; i++) solid[at(i, j, k)] = 0;
 
   const bWall = admittanceFor(scene.sky.wallsAbsorb),
         bFloor = admittanceFor(scene.ground.absorb),
         bCeil = admittanceFor(scene.sky.ceilingAbsorb);
   for (let k = -1; k <= iz; k++)
-    for (let j = -1; j <= ix; j++)
+    for (let j = -1; j <= iy; j++)
       for (let i = -1; i <= ix; i++) {
         const p = at(i, j, k);
-        if (i < 0 || j < 0 || i >= ix || j >= ix) skin[p] = bWall;
+        if (i < 0 || j < 0 || i >= ix || j >= iy) skin[p] = bWall;
         if (k < 0) skin[p] = bFloor;
         if (k >= iz) skin[p] = bCeil;
       }
@@ -131,17 +144,17 @@ export function carve(scene, want, height) {
   if (scene.sun) {
     const open = admittanceFor(0.99);
     for (let k = -1; k <= iz; k++)
-      for (let j = -1; j <= ix; j++)
+      for (let j = -1; j <= iy; j++)
         for (let i = -1; i <= ix; i++) {
           const p = at(i, j, k);
-          if (i < 0 || j < 0 || i >= ix || j >= ix || k >= iz) skin[p] = open;
+          if (i < 0 || j < 0 || i >= ix || j >= iy || k >= iz) skin[p] = open;
         }
   }
 
   for (const f of scene.furniture) {
     const top = Math.min(iz, Math.round((f.z || 200) / cell));
     const b = admittanceFor(f.absorb == null ? 0.15 : f.absorb);
-    for (let j = 0; j < ix; j++)
+    for (let j = 0; j < iy; j++)
       for (let i = 0; i < ix; i++) {
         if (!inside(f, (i + 0.5) * cell, (j + 0.5) * cell)) continue;
         for (let k = 0; k < top; k++) { const p = at(i, j, k); solid[p] = 1; skin[p] = b; }
@@ -154,7 +167,7 @@ export function carve(scene, want, height) {
   const open = [], edge = [], reads = [];
   const loss = new Float32Array(N);
   for (let k = 0; k < iz; k++)
-    for (let j = 0; j < ix; j++)
+    for (let j = 0; j < iy; j++)
       for (let i = 0; i < ix; i++) {
         const p = at(i, j, k);
         if (solid[p]) continue;
@@ -181,7 +194,7 @@ export function carve(scene, want, height) {
   const flat = new Int32Array(reads.length * 6);
   reads.forEach((r, n) => flat.set(r, n * 6));
 
-  return { ix, iz, nx, ny, nz, N, sy, sz, cell, at, solid, loss,
+  return { ix, iy, iz, nx, ny, nz, N, sy, sz, cell, at, solid, loss,
            open: Int32Array.from(open), edge: Int32Array.from(edge), reads: flat };
 }
 
@@ -204,7 +217,7 @@ function speakFrom(room, i, j, k) {
       for (let dj = -out; dj <= out; dj++)
         for (let di = -out; di <= out; di++) {
           const a = i + di, b = j + dj, c = k + dk;
-          if (a < 0 || b < 0 || c < 0 || a >= room.ix || b >= room.ix || c >= room.iz) continue;
+          if (a < 0 || b < 0 || c < 0 || a >= room.ix || b >= room.iy || c >= room.iz) continue;
           const p = room.at(a, b, c);
           if (room.solid[p]) continue;
           const d = di * di + dj * dj + dk * dk;
@@ -248,8 +261,8 @@ export function ring(room, source, opts) {
   let was = new Float32Array(room.N), now = new Float32Array(room.N),
       next = new Float32Array(room.N);
 
-  const face = new Int32Array(room.ix * room.ix);
-  for (let j = 0; j < room.ix; j++)
+  const face = new Int32Array(room.ix * room.iy);
+  for (let j = 0; j < room.iy; j++)
     for (let i = 0; i < room.ix; i++) face[j * room.ix + i] = room.at(i, j, plane);
   const heard = new Float32Array(face.length);
   /* The whole room's energy at each step, when somebody is checking how
@@ -258,7 +271,7 @@ export function ring(room, source, opts) {
 
   const sp = speakFrom(room,
     Math.max(0, Math.min(room.ix - 1, Math.floor(source.x / room.cell))),
-    Math.max(0, Math.min(room.ix - 1, Math.floor(source.y / room.cell))),
+    Math.max(0, Math.min(room.iy - 1, Math.floor(source.y / room.cell))),
     Math.max(0, Math.min(room.iz - 1, Math.floor(source.z / room.cell))));
   if (sp < 0) return { heard, steps: 0, dt, plane };
 
@@ -329,7 +342,7 @@ export function ring(room, source, opts) {
      if one of those is a hole the reading dives for no reason the child
      can see. So flood the holes with what is going on just outside them. */
   const holes = [];
-  for (let j = 0; j < room.ix; j++)
+  for (let j = 0; j < room.iy; j++)
     for (let i = 0; i < room.ix; i++)
       if (room.solid[face[j * room.ix + i]]) holes.push(j * room.ix + i);
   for (let pass = 0; pass < 4 && holes.length; pass++) {
@@ -339,7 +352,7 @@ export function ring(room, source, opts) {
       let sum = 0, n = 0;
       for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const a = i + di, b = j + dj;
-        if (a < 0 || b < 0 || a >= room.ix || b >= room.ix) continue;
+        if (a < 0 || b < 0 || a >= room.ix || b >= room.iy) continue;
         const v = heard[b * room.ix + a];
         if (v > 0) { sum += v; n++; }
       }
@@ -369,7 +382,7 @@ export function yardstick(cell) {
   /* an exact multiple, so carve does not round the cell to something else
      and calibrate the wrong grid */
   const side = cell * 40;
-  const air = { size: side, sun: false, ground: { absorb: 0.99 },
+  const air = { w: side, h: side, span: side, sun: false, ground: { absorb: 0.99 },
                 sky: { wallsAbsorb: 0.99, ceilingAbsorb: 0.99 }, furniture: [] };
   const room = carve(air, cell, side);
   const mid = Math.floor(room.ix / 2), midZ = Math.floor(room.iz / 2);

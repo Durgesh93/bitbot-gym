@@ -69,7 +69,7 @@ export function createSound(scene, opts) {
      materials change - which is when furniture moves, and almost never
      otherwise. Everything solved in the old room is wrong in the new one. */
   function shapeKey() {
-    let k = scene.size + "|" + scene.ground.absorb + "|" + (scene.sun ? "out" : "in") +
+    let k = scene.w + "x" + scene.h + "|" + scene.ground.absorb + "|" + (scene.sun ? "out" : "in") +
             "|" + scene.sky.wallsAbsorb + "," + scene.sky.ceilingAbsorb;
     for (const f of scene.furniture)
       k += "|" + Math.round(f.x) + "," + Math.round(f.y) + "," + f.w + "," + f.h +
@@ -108,9 +108,9 @@ export function createSound(scene, opts) {
   /* Read the grid the way a sensor would: smoothly, between cells, so a
      robot rolling along does not read in steps. */
   function look(field, x, y) {
-    const r = room, n = r.ix;
-    const u = Math.max(0, Math.min(n - 1.001, x / r.cell - 0.5));
-    const v = Math.max(0, Math.min(n - 1.001, y / r.cell - 0.5));
+    const r = room, n = r.ix;                  // n is the ROW STRIDE, not the depth
+    const u = Math.max(0, Math.min(r.ix - 1.001, x / r.cell - 0.5));
+    const v = Math.max(0, Math.min(r.iy - 1.001, y / r.cell - 0.5));
     const i = Math.floor(u), j = Math.floor(v), fx = u - i, fy = v - j;
     const a = field[j * n + i], b = field[j * n + i + 1];
     const c = field[(j + 1) * n + i], d = field[(j + 1) * n + i + 1];
@@ -143,12 +143,12 @@ export function createSound(scene, opts) {
     speakers,
     /* the whole field on a grid, for anyone who wants to look at it */
     field: () => { const list = sources(); if (!list.length) return null;
-                   const r = theRoom(); const out = new Float32Array(r.ix * r.ix);
+                   const r = theRoom(); const out = new Float32Array(r.ix * r.iy);
                    for (const s of list) {
                      const g = responseTo(s), power = s.loud * (s.reach / REF) * (s.reach / REF);
                      for (let i = 0; i < out.length; i++) out[i] += power * g[i];
                    }
-                   return { grid: out, n: r.ix, cell: r.cell }; },
+                   return { grid: out, n: r.ix, ny: r.iy, cell: r.cell }; },
     stale() { shapedFor = null; solved.clear(); }
   };
 }

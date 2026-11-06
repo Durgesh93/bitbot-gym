@@ -75,7 +75,7 @@ function clearSpot(scene, x, y, w, h, dodge) {
       const a = (i / 8) * Math.PI * 2;
       const px = x + Math.cos(a) * ring * step, py = y + Math.sin(a) * ring * step;
       if (px > w / 2 + 60 && py > h / 2 + 60 &&
-          px < scene.size - w / 2 - 60 && py < scene.size - h / 2 - 60 &&
+          px < scene.w - w / 2 - 60 && py < scene.h - h / 2 - 60 &&
           !taken(px, py)) return { x: px, y: py };
     }
   }
@@ -108,11 +108,12 @@ export function createEnvironment(data) {
      floor, looking straight up, and it wants the whole room at once. The
      renderer must not reach into the fields itself, so it asks here. */
   function lightMap(n) {
-    const out = new Float32Array(n * n);
-    const step = scene.size / n;
-    for (let j = 0; j < n; j++) {
+    const m = Math.max(2, Math.round(n * scene.h / scene.w));
+    const out = new Float32Array(n * m);
+    const sx = scene.w / n, sy = scene.h / m;
+    for (let j = 0; j < m; j++) {
       for (let i = 0; i < n; i++) {
-        out[j * n + i] = light.at({ x: (i + 0.5) * step, y: (j + 0.5) * step }, { z: 0 });
+        out[j * n + i] = light.at({ x: (i + 0.5) * sx, y: (j + 0.5) * sy }, { z: 0 });
       }
     }
     return out;
@@ -120,8 +121,60 @@ export function createEnvironment(data) {
 
   return {
     name: scene.name,
-    size: scene.size,
+    /* GETTERS, ALL THREE. These were plain values, read once when the
+       environment was built, and a room that can be reshaped makes that
+       a trap: anybody holding `env.size` would be holding the size the
+       room used to be. `size` is the long way across. */
+    get size() { return Math.max(scene.w, scene.h); },
+    get w() { return scene.w; },
+    get h() { return scene.h; },
     scene: scene,
+
+    /* ---- RESHAPING THE ROOM -------------------------------------------
+
+       The gym stretches the room to the shape of the canvas, so this is
+       called whenever the window or the resize grip changes that shape.
+       Three things have to happen together and in this order, or the room
+       is briefly lying: the numbers change, the walls are rebuilt round
+       the new rectangle, and everything that is now outside is pulled
+       back in. Then every field is stale, because the shape of the room
+       is the one input they all share. */
+    reshape(w, h) {
+      const W = Math.max(400, Math.round(w)), H = Math.max(400, Math.round(h));
+      if (W === scene.w && H === scene.h) return false;
+      scene.w = W; scene.h = H; scene.span = Math.max(W, H);
+      motion.buildWalls();
+
+      /* INSIDE, EVERYTHING. A room that narrows leaves furniture standing
+         in the wall and robots outside it altogether, and a robot outside
+         the walls can never be driven back in - the walls are in the way
+         from that side too. */
+      const edge = 40;
+      for (const f of scene.furniture) {
+        f.x = Math.max(edge, Math.min(W - f.w - edge, f.x));
+        f.y = Math.max(edge, Math.min(H - f.h - edge, f.y));
+      }
+      /* the physics body is built AROUND the spec, so a spec that has
+         just been moved needs its body made again - the same two steps
+         moveThing takes */
+      for (const f of scene.furniture) { motion.removeThing(f); motion.addThing(f); }
+      for (const L of scene.lamps) {
+        L.x = Math.max(edge, Math.min(W - edge, L.x));
+        L.y = Math.max(edge, Math.min(H - edge, L.y));
+      }
+      for (const M of scene.magnets || []) {
+        M.x = Math.max(edge, Math.min(W - edge, M.x));
+        M.y = Math.max(edge, Math.min(H - edge, M.y));
+      }
+      for (const b of motion.bodies()) {
+        const r = b.r + 10;
+        const x = Math.max(r, Math.min(W - r, b.x)), y = Math.max(r, Math.min(H - r, b.y));
+        if (x !== b.x || y !== b.y) motion.place(b.id, x, y, b.h);
+      }
+      moved();
+      sound.stale();
+      return true;
+    },
 
     raycast: (from, angle, opts) => motion.raycast(from, angle, opts),
     lightAt: (p, opts) => light.at(p, opts),
@@ -419,7 +472,10 @@ export function createEnvironment(data) {
     snapshot() {
       return {
         name: scene.name,
-        size: scene.size,
+        /* w and h, because the room is a rectangle now. `size` is still
+           sent and is the LONG side: anything that wants one number off
+           the room wants to know how far across it is. */
+        w: scene.w, h: scene.h, size: Math.max(scene.w, scene.h),
         walls: scene.walls,
         ground: scene.ground.material,
         /* Copied, not handed over. These were the live arrays, and a

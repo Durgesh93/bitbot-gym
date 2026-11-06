@@ -36,28 +36,34 @@ export default function App() {
 
   /* THE ROOM'S CONTROLS LIVE UP HERE, because the menu bar does.
 
-     Which pointer tool is live, what it would put down, which sensor
-     views are showing and whether trails are on: all view state, none of
-     it known to the gym. RoomView is then only a canvas and the hand on
-     it, which is the right size for that file. */
+     Which sensor views are showing and whether trails are on: view state,
+     none of it known to the gym. RoomView is then only a canvas and the
+     hand on it, which is the right size for that file.
+
+     THERE IS NO POINTER TOOL ANY MORE, AND NO ROOM, ROBOTS OR BUILD MENU
+     EITHER. The pointer always drags, and everything that used to be a
+     mode or a menu item up here - add a robot, add a chair, remove, pen,
+     rubber, switch that lamp off - is a left click on the thing or the
+     spot it acts on, down in RoomView. The mode was invisible from the
+     canvas, which is the whole reason it kept dropping chairs on robots;
+     the menus were four clicks away from the place you were pointing at.
+
+     What stays up here is what has no object to click: the sensor views,
+     the clock, the robot tuning, and saving or opening the room. */
   const [tune, setTune] = useState(() => ask({ cmd: "tuning" }));
   const set = (k, v) => setTune(ask({ cmd: "tune", [k]: v }));
-  const [tool, setTool] = useState("move");
-  const [thing, setThing] = useState("chair");
   const [show, setShow] = useState({ light: false, sonar: false });
   const [trail, setTrail] = useState(true);
   const [catalogue, setCatalogue] = useState([]);
   useEffect(() => { setCatalogue(ask({ cmd: "catalogue" }) || []); }, [ask]);
   const anyView = show.light || show.sonar;
   const flip = k => setShow(v => ({ ...v, [k]: !v[k] }));
-  const TOOL_NAME = { move: "drag", place: "add " + thing, take: "remove",
-                      pen: "draw line", erase: "erase line" };
-  /* Put something new in the middle of the room. The world walks it out to
-     a clear patch from there, so two of them never land on each other. */
-  const put = (m) => post({ ...m, x: snap.size / 2, y: snap.size / 2 });
+  /* There is no "put it in the middle of the room" helper any more: nothing
+     is added from up here. Everything lands on the spot that was clicked,
+     which is both fewer steps and the thing the hand already meant. */
   const [chosen, setChosen] = useState(1);
   const [projects, setProjects] = useState({});
-  /* Which crowded cards the teacher has opened up. This is view state and
+  /* Which cards the teacher has opened up. This is view state and
      nothing else - the gym does not know or care, and losing it on reload
      costs nobody anything. */
   const [open, setOpen] = useState(() => new Set());
@@ -128,10 +134,13 @@ export default function App() {
      while it is pointed at. Follow the room rather than remember a number
      that has stopped meaning anything. */
   const chosenId = boards.some(b => b.id === chosen) ? chosen : (boards[0] ? boards[0].id : null);
-  /* Past four robots a wall of full cards stops being readable, so they
-     fold down to a line each and open on a click. Four is where two
-     columns of full cards stop fitting a laptop screen. */
-  const crowd = boards.length > 4;
+  /* EVERY CARD STARTS FOLDED, however few robots there are.
+     It used to be only past four, on the grounds that a wall of full cards
+     stops being readable - but the thing under the cards is the ROOM, and
+     a Chromebook is 768 pixels tall. One full card pushed the room off the
+     top of the screen. A folded card still shows the screen, the eyes, the
+     sonar, the last thing the robot said, and Play, Stop and Code; what it
+     costs is the detail, and the detail is one click away. */
   const toggle = useCallback(id => setOpen(s => {
     const n = new Set(s);
     if (n.has(id)) n.delete(id); else n.add(id);
@@ -224,22 +233,42 @@ export default function App() {
           : ""), "say");
   }, [ask, snap]);
 
-  const saveToFile = useCallback(() => {
-    const name = window.prompt("What shall this project be called?", "my project");
-    if (name == null) return;
+  /* SAVING MUST NOT GO THROUGH window.prompt.
+
+     It did, and the button looked broken: a browser is free to suppress
+     a page's dialogs - Chrome does it once anybody ticks "prevent this
+     page from creating additional dialogs", and some managed Chromebooks
+     do it from the start - and a suppressed prompt does not throw, it
+     just returns null. The old code read that as "cancelled" and went
+     quietly home: no file, no message, nothing. A child pressing Save and
+     getting silence has no way to tell that from a broken program.
+
+     So the name is asked for on the page, in our own box, which cannot be
+     switched off. */
+  const [naming, setNaming] = useState(null);
+  const [forgetting, setForgetting] = useState(false);
+
+  const writeFile = useCallback((name) => {
     const p = captureNow(name);
     const blob = new Blob([JSON.stringify(p, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
+    a.href = url;
     a.download = p.name.replace(/[^\w .-]+/g, " ").trim() + ".gym.json";
+    /* in the document before it is clicked: a loose anchor is enough for
+       Chrome but not for every browser, and this costs one line */
+    a.style.display = "none";
+    document.body.appendChild(a);
     a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 4000);
     /* and onto the shelf as well, so next week it is one press rather
        than a trip through a file picker. The file is the one that
        survives a reimaged laptop; this is the one that is quick. */
     if (shelf.put(p)) setRooms(shelf.list());
-    say('saved "' + p.name + '"', "say");
+    say('saved "' + p.name + '" - look in your Downloads', "say");
   }, [captureNow]);
+
+  const saveToFile = useCallback(() => setNaming("my project"), []);
 
   const openFromFile = useCallback(async (file) => {
     if (!file) return;
@@ -293,58 +322,56 @@ export default function App() {
         <span className="title">Bit:Bot <span>Gym</span></span>
 
         <MenuBar>
-            <Menu label="Room">
-              <Sep label="lights and sound" />
-              {(snap.lamps || []).map((L, i) => (
-                <Item key={"l" + i} on={L.on} onClick={() => post({ cmd: "lamp", id: i })}>
-                  {L.kind === "ceiling" ? "Ceiling light " : "Lamp "}{i + 1}
-                </Item>
-              ))}
-              {(snap.speakers || []).map((S, i) => (
-                <Item key={"s" + i} on={S.playing} onClick={() => post({ cmd: "speaker", id: i })}>
-                  Speaker {i + 1}
-                </Item>
-              ))}
-              {snap.sun && <Row><span className="hint">the sun lights this one</span></Row>}
-              {/* A lamp could be moved and taken away but never put in, so a
-                  room was stuck with whatever its scene hung. It lands in the
-                  middle and you drag it where you want it. */}
-              {/* AND THE POINTER GOES BACK TO DRAGGING.
+            {/* ONE MENU IN THE BAR, and nothing in it acts on a single
+                object.
 
-                  The hint here says "drag it", and it was a lie whenever
-                  the Build menu had been used first: the pointer was still
-                  in "add chair", so the next click - the obvious one,
-                  straight at the new lamp, to move it somewhere useful -
-                  put a chair on top of it and the room went dark. Anything
-                  that lands in the middle and asks to be dragged has to
-                  leave the hand able to drag it. */}
-              <Sep />
-              <Item onClick={() => { setTool("move"); put({ cmd: "addLamp" }); }}
-                    hint="stands in the room - drag it">Add a lamp</Item>
-              <Item onClick={() => { setTool("move"); put({ cmd: "addLamp", kind: "ceiling" }); }}
-                    hint="shines straight down">Add a ceiling light</Item>
-              <Item onClick={() => { setTool("move"); put({ cmd: "addSpeaker" }); }}
-                    hint="the microphone can hear it">Add a speaker</Item>
-              <Item onClick={() => { setTool("move"); put({ cmd: "addMagnet" }); }}
-                    hint="upsets the compass near it">Add a magnet</Item>
-            </Menu>
+                Room, Robots and Build are gone. Everything they held acts
+                on a THING or on a SPOT, and both of those are now a left
+                click on the thing or the spot: a lamp is switched off by
+                clicking the lamp, a chair is put down by clicking the floor
+                where you want it. A menu bar entry for "add a chair
+                somewhere" was always a worse version of pointing at the
+                place you meant.
 
-            {/* THE ROBOTS: what to put in, and what the hardware is like.
-
-                The settings are one set for every robot on purpose. They
-                describe the Bit:Bots and the floor the class actually has
-                - measure one of them once and the gym stops lying to you -
-                and ten robots that each drove differently would make every
-                lesson unrepeatable. */}
-            <Menu label="Robots" chip={boards.length || null}>
-              <Sep label="two kinds, two lessons" />
-              <Item onClick={() => post({ cmd: "add" })}
-                    hint="wheels, eyes, sonar">Add a Bit:Bot</Item>
-              <Item onClick={() => post({ cmd: "add", kind: "microbit" })}
-                    hint="just the board">Add a micro:bit</Item>
-              <Item onClick={() => post({ cmd: "home" })} hint="back to the start">
-                Put them all back
+                What is left is the handful of settings that belong to the
+                whole gym - what the sensors draw, how fast time runs, and
+                what the real Bit:Bots are like - which have no object to
+                click on. They are one menu because a header is the one
+                piece of furniture a 1366-pixel Chromebook cannot spare. */}
+            <Menu label="Setup" chip={anyView
+              ? [show.light && "light", show.sonar && "sonar"]
+                  .filter(Boolean).join(" ")
+              : (speed > 1 ? speed + "x" : (running ? null : "paused"))}>
+              <Sep label="what the sensors see" />
+              <Item on={!anyView}
+                    onClick={() => setShow({ light: false, sonar: false })}>
+                Plain
               </Item>
+              <Item on={show.light} onClick={() => flip("light")}
+                    hint="a blob at each eye">Light sensors</Item>
+              <Item on={show.sonar} onClick={() => flip("sonar")}
+                    hint="the real pings">Sonar</Item>
+              <Item on={trail} onClick={() => setTrail(!trail)}
+                    hint="where it has just been">Trail</Item>
+
+              {/* THE CLOCK, which used to be a menu of its own for two
+                  controls. Nobody needs a whole menu to make time run
+                  double speed, and the two lines cost nothing here. */}
+              <Sep label="how fast time runs" />
+              <Row label="speed">
+                <select value={speed} onChange={e => setSpeed(Number(e.target.value))}>
+                  {[1, 2, 4, 8].map(v => <option key={v} value={v}>{v}x</option>)}
+                </select>
+              </Row>
+              <Item on={!running} onClick={() => setRunning(!running)}>
+                {running ? "Pause the clock" : "Start the clock"}
+              </Item>
+
+              {/* THE HARDWARE. One set for every robot on purpose: these
+                  describe the Bit:Bots and the floor the class actually
+                  has - measure one of them once and the gym stops lying to
+                  you - and ten robots that each drove differently would
+                  make every lesson unrepeatable. */}
               <Sep label="what your real robot is like" />
               <Slider label="top speed" hint="mm a second at 100%"
                       min={150} max={900} step={10} value={tune.top}
@@ -361,107 +388,68 @@ export default function App() {
               <Slider label="battery" hint="a tired battery is slower"
                       min={10} max={100} step={1} value={tune.battery} unit="%"
                       onChange={v => set("battery", v)} />
-              <Sep />
               <Item on={tune.lightUp} onClick={() => set("lightUp", !tune.lightUp)}
                     hint={tune.lightUp ? "as ours are wired" : "some boards read backwards"}>
                 Light sensors: brighter reads higher
               </Item>
             </Menu>
-
-            <Menu label="Build" chip={TOOL_NAME[tool]}>
-              <Sep label="what the pointer does" />
-              <Item on={tool === "move"} onClick={() => setTool("move")}
-                    hint="pick a robot up">Drag things</Item>
-              <Item on={tool === "place"} onClick={() => setTool("place")}
-                    hint="click the floor">Add object</Item>
-              <Item on={tool === "take"} onClick={() => setTool("take")}
-                    hint="click a thing">Remove object</Item>
-              <Item on={tool === "pen"} onClick={() => setTool("pen")}
-                    hint="drag to lay tape">Draw line</Item>
-              <Item on={tool === "erase"} onClick={() => setTool("erase")}
-                    hint="drag over tape">Erase line</Item>
-              <Row label="put down">
-                <select value={thing}
-                        onChange={e => { setThing(e.target.value); setTool("place"); }}>
-                  {catalogue.map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </Row>
-              <Sep label="the whole room at once" />
-              <Item onClick={() => post({ cmd: "furnish" })}>Furnish room</Item>
-              <Item onClick={() => post({ cmd: "empty" })} hint="lights stay on">Empty room</Item>
-              <Item onClick={() => post({ cmd: "clearFloor" })}>Clear floor</Item>
-            </Menu>
-
-            <Menu label="View" chip={anyView
-              ? [show.light && "light", show.sonar && "sonar"]
-                  .filter(Boolean).join(" ")
-              : null}>
-              <Sep label="what the sensors see" />
-              <Item on={!anyView}
-                    onClick={() => setShow({ light: false, sonar: false })}>
-                Plain
-              </Item>
-              <Item on={show.light} onClick={() => flip("light")}
-                    hint="a blob at each eye">Light sensors</Item>
-              <Item on={show.sonar} onClick={() => flip("sonar")}
-                    hint="the real pings">Sonar</Item>
-              <Sep />
-              <Item on={trail} onClick={() => setTrail(!trail)}
-                    hint="where it has just been">Trail</Item>
-            </Menu>
-
-            {/* ROOMS, not "projects": what is saved is the room as it was
-                set up, and a teacher looking for last week's two-board
-                radio lesson is looking for a room. The file comes first
-                because it is the one that survives a new laptop; the
-                list under it is this browser's own copy, for speed. */}
-            {/* PROJECTS, not "Rooms". It sat next to "Room" and the two
-                were read as the same menu twice - and they are not even
-                the same kind of thing: Room is the furniture you are
-                standing in, this is the whole lesson saved to a file.
-                The word "room" is out of the wording here for the same
-                reason. */}
-            <Menu label="Projects" chip={rooms.length ? String(rooms.length) : null}>
-              <Item onClick={saveToFile} hint="a .gym.json you can keep or send on">
-                Save this as a project
-              </Item>
-              <Item onClick={() => projectFile.current && projectFile.current.click()}
-                    hint="sets the whole lesson up again">Open a project file</Item>
-              {rooms.length > 0 && <Sep label="saved in this browser" />}
-              {rooms.map(r => (
-                <Item key={r.name} onClick={() => { const p = shelf.get(r.name); if (p) openProject(p); }}
-                      hint={r.saved ? new Date(r.saved).toLocaleDateString() : null}>
-                  {r.name}
-                </Item>
-              ))}
-              {rooms.length > 0 && (
-                <Item onClick={() => {
-                        const name = window.prompt("Forget which project? (its file is not touched)");
-                        if (name && shelf.remove(name)) setRooms(shelf.list());
-                      }}
-                      hint="only from this browser, never the file">Forget a saved project</Item>
-              )}
-            </Menu>
-
-            <Menu label="Clock" chip={speed > 1 ? speed + "x" : (running ? null : "paused")}>
-              <Row label="speed">
-                <select value={speed} onChange={e => setSpeed(Number(e.target.value))}>
-                  {[1, 2, 4, 8].map(v => <option key={v} value={v}>{v}x</option>)}
-                </select>
-              </Row>
-              <Item on={!running} onClick={() => setRunning(!running)}>
-                {running ? "Pause the clock" : "Start the clock"}
-              </Item>
-            </Menu>
         </MenuBar>
+
+        <span className="spacer" />
+
+        {/* SAVE AND OPEN, IN THE OPEN. They were a "Projects" menu, which
+            is a menu you open to find the one button you wanted. Saving a
+            room is the thing a teacher does at the end of every lesson and
+            opening one is the thing they do at the start of the next, so
+            both are one press now.
+
+            Open still has a list under it, because the browser's own copy
+            of last week's room is the fast way back to it - but the button
+            says Open and does the obvious thing if you ignore the list. */}
+        <button className="hdrbtn" onClick={saveToFile}
+                title="keeps a .gym.json file you can send on">Save</button>
+        <Menu label="Open" chip={rooms.length ? String(rooms.length) : null}>
+          <Item onClick={() => projectFile.current && projectFile.current.click()}
+                hint="a .gym.json you saved before">Choose a file...</Item>
+          {rooms.length > 0 && (
+            <Sep label={forgetting ? "pick one to forget" : "saved in this browser"} />
+          )}
+          {rooms.map(r => (
+            <Item key={r.name}
+                  onClick={() => {
+                    if (forgetting) {
+                      if (shelf.remove(r.name)) setRooms(shelf.list());
+                      setForgetting(false);
+                      say('forgot "' + r.name + '" - your file is untouched', "say");
+                      return;
+                    }
+                    const p = shelf.get(r.name);
+                    if (p) openProject(p);
+                  }}
+                  hint={forgetting ? "forget this one"
+                                   : (r.saved ? new Date(r.saved).toLocaleDateString() : null)}>
+              {r.name}
+            </Item>
+          ))}
+          {/* also a prompt once, also silently broken when the browser
+              suppressed it: now it is two clicks on the page instead */}
+          {rooms.length > 0 && (
+            <Item on={forgetting} keepOpen onClick={() => setForgetting(!forgetting)}
+                  hint="only from this browser, never the file">
+              {forgetting ? "no, keep them all" : "Forget a saved project"}
+            </Item>
+          )}
+        </Menu>
+
 
         <input ref={projectFile} type="file" accept=".json,.gym.json,application/json" hidden
                onChange={e => { const f = e.target.files && e.target.files[0];
                                 if (f) openFromFile(f);
                                 e.target.value = ""; }} />
 
-        <span className="spacer" />
-        <span className="where">{coding == null ? "the room" : "the blocks"}</span>
+        {/* "the room" / "the blocks" is gone from here. It was a label
+            saying which page you were looking at, to somebody who was
+            looking at it. */}
         {/* IN THE OPEN, not in a menu. It was an item in View, where
             nobody found it: a thing you change for the room you are
             sitting in, at four o'clock on a dark afternoon, should be one
@@ -472,6 +460,39 @@ export default function App() {
           {theme === "dark" ? "\u2600" : "\u263d"}
         </button>
       </header>
+
+      {/* THE SAVE BOX. Our own, on the page, because the browser's prompt
+          can be switched off (see writeFile above). It is a form, so
+          Enter saves and the keyboard works the way a keyboard works;
+          Escape or Cancel puts it away. */}
+      {naming !== null && (
+        <div className="shade" onMouseDown={e => { if (e.target === e.currentTarget) setNaming(null); }}>
+          <form className="namebox"
+                onSubmit={e => {
+                  e.preventDefault();
+                  const n = naming.trim();
+                  if (!n) return;
+                  setNaming(null);
+                  writeFile(n);
+                }}>
+            <h2>What shall this room be called?</h2>
+            {/* the suggestion arrives selected, the way the browser's own
+                prompt did it: a child types the name and it replaces
+                "my project" instead of landing in the middle of it */}
+            <input autoFocus value={naming} spellCheck="false"
+                   aria-label="a name for this room"
+                   onFocus={e => e.target.select()}
+                   onChange={e => setNaming(e.target.value)}
+                   onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); setNaming(null); } }} />
+            <p className="small">It goes to your Downloads as a <b>.gym.json</b> file,
+              and into this browser's Open list.</p>
+            <div className="namerow">
+              <button type="button" className="hdrbtn" onClick={() => setNaming(null)}>Cancel</button>
+              <button type="submit" className="hdrbtn go" disabled={!naming.trim()}>Save it</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {notice && (
         <div className={"notice" + (notice.cls === "err" ? " bad" : "")}
@@ -484,7 +505,7 @@ export default function App() {
       <main className="tab-room">
         <div className="left">
           <RoomView snap={snap} post={post} ask={ask}
-                    tool={tool} thing={thing} show={show} trail={trail} />
+                    catalogue={catalogue} show={show} trail={trail} />
         </div>
         {/* TEN ROBOTS, ONE TEACHER.
             Every card has its own Stop and Reset, which is right - a child
@@ -508,13 +529,13 @@ export default function App() {
             <span className="hint">{boards.length} in the room</span>
           </div>
         )}
-        <div className={"cards" + (crowd ? " crowded" : "")}>
+        <div className="cards crowded">
           {boards.length === 0 &&
-            <p className="hint">nothing in the room yet - add one from the Robots menu</p>}
+            <p className="hint">nothing in the room yet - click the floor and take a robot</p>}
           {boards.map(b => (
             <Card key={b.id} body={b} post={post} log={byBoard.get(b.id)}
-                  compact={crowd && !open.has(b.id)}
-                  onToggle={crowd ? () => toggle(b.id) : undefined}
+                  compact={!open.has(b.id)}
+                  onToggle={() => toggle(b.id)}
                   onCode={id => { setChosen(id); setCoding(id); }} />
           ))}
         </div>

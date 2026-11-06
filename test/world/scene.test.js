@@ -5,7 +5,9 @@ describe("loading a scene", () => {
   it("fills in everything a bare scene left out", () => {
     const s = loadScene({});
     expect(s.name).toBe("Room");
-    expect(s.size).toBe(2000);
+    expect(s.w).toBe(2000);
+    expect(s.h).toBe(2000);
+    expect(s.span).toBe(2000);
     expect(s.walls).toBe(true);
     expect(s.ground.material).toBe("lino");
     expect(s.sun).toBe(null);
@@ -14,6 +16,27 @@ describe("loading a scene", () => {
 
   it("takes nothing at all", () => {
     expect(() => loadScene()).not.toThrow();
+  });
+
+  /* THE ROOM IS A RECTANGLE. It used to be one number and a square, and
+     every scene and every saved project written before that changed says
+     `size`, so `size` still has to mean a square room of that side. */
+  it("reads an old scene's single size as a square room", () => {
+    const s = loadScene({ size: 1600 });
+    expect(s.w).toBe(1600);
+    expect(s.h).toBe(1600);
+    expect(s.span).toBe(1600);
+  });
+
+  it("takes a width and a depth, and spans the long way", () => {
+    const s = loadScene({ w: 3400, h: 2000 });
+    expect(s.w).toBe(3400);
+    expect(s.h).toBe(2000);
+    expect(s.span).toBe(3400);
+  });
+
+  it("will not load a room shallower than the robot", () => {
+    expect(() => loadScene({ w: 3000, h: 60 })).toThrow(/deep/);
   });
 
   it("gives the ground the physics of its material", () => {

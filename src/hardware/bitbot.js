@@ -10,6 +10,7 @@
    Every measurement is off the real board. */
 
 import { clamp } from "../core/util.js";
+import { ADDONS, defaultFit, allows, isBuiltIn, clashesWith } from "./addons.js";
 
 export const CHASSIS = {
   axle: 110,       // how far apart the wheels are
@@ -121,7 +122,19 @@ export function createChassis(spec) {
     bias: { dir: null, amount: 0 },
     enc: { L: 0, R: 0 },                    // how far each wheel has rolled, in mm
     pixels: new Array(12).fill(null),
-    bright: 40
+    bright: 40,
+
+    /* WHAT IS BOLTED ON, and what each bolted-on board is showing.
+
+       Kept here with the motors and the pixels because it is the same
+       kind of fact: a property of this one robot that the blocks write
+       to and the card reads. `fit` says which boards exist; `show`
+       holds what they are displaying. A board that is not fitted keeps
+       its picture anyway - unfit the matrix and refit it and your
+       drawing is still there, exactly as unplugging a monitor does not
+       wipe the computer. */
+    fit: defaultFit(s.model || "XL"),
+    show: freshShow()
   };
 
   /* What a wheel is being asked to do, in mm/s. */
@@ -136,7 +149,30 @@ export function createChassis(spec) {
   }
 
   return {
-    model(v) { if (v != null) state.model = v; return state.model; },
+    /* Changing the model can make what is bolted on impossible - a
+       Classic cannot carry the claw and the eyes at once, and a PRO has
+       its own IR receiver so a second one has nowhere to go. Anything
+       that no longer fits falls off, quietly, rather than staying on as
+       a board that is fitted and does nothing. */
+    model(v) {
+      if (v != null && v !== state.model) {
+        state.model = v;
+        for (const id of Object.keys(state.fit)) {
+          if (!allows(v, id) || isBuiltIn(v, id)) delete state.fit[id];
+        }
+        /* Walk the catalogue in its own order and keep the first of
+           any clashing pair, so the eyes beat the claw rather than
+           whichever happened to be fitted first. The order in
+           addons.js is the order of importance. */
+        const kept = {};
+        for (const a of ADDONS) {
+          if (!state.fit[a.id]) continue;
+          if (clashesWith(v, a.id, kept).length) delete state.fit[a.id];
+          else kept[a.id] = true;
+        }
+      }
+      return state.model;
+    },
     brake(v) { if (v != null) state.brake = !!v; return state.brake; },
     battery(v) { if (v != null) state.battery = clamp(v, 0, 100); return state.battery; },
     bias(dir, amount) { state.bias = { dir: dir, amount: amount }; },
@@ -176,8 +212,70 @@ export function createChassis(spec) {
       state.pixels = new Array(12).fill(null);
       state.bright = 40;
       state.battery = 100;
+      /* the boards stay bolted on - Reset puts the program back to the
+         start, it does not unscrew the hardware - but what they are
+         showing is part of the program's doing, so that goes */
+      state.show = freshShow();
     },
     state: () => ({ ...state, bias: { ...state.bias }, enc: { ...state.enc },
-                    pixels: state.pixels.slice() })
+                    pixels: state.pixels.slice(),
+                    fit: { ...state.fit }, show: copyShow(state.show) }),
+
+    /* ---------------- what is bolted on ----------------
+
+       `fit` with no second argument asks; with one, it screws the board
+       on or takes it off. It refuses what this model cannot take and
+       what would collide with something already fitted, and says which,
+       so the menu can explain itself rather than just going dead. */
+    fitted: (id) => !!state.fit[id] || isBuiltIn(state.model, id),
+    fitting: () => ({ ...state.fit }),
+    fit(id, on) {
+      if (on == null) return !!state.fit[id];
+      if (!on) { delete state.fit[id]; return { ok: true, fitted: false }; }
+      if (isBuiltIn(state.model, id)) return { ok: false, why: "builtIn" };
+      if (!allows(state.model, id)) return { ok: false, why: "model" };
+      const bad = clashesWith(state.model, id, state.fit);
+      if (bad.length) return { ok: false, why: "clash", with: bad };
+      state.fit[id] = true;
+      return { ok: true, fitted: true };
+    },
+    /* A whole set at once, for opening a saved project. */
+    refit(fit) {
+      state.fit = {};
+      for (const id of Object.keys(fit || {})) if (fit[id]) this.fit(id, true);
+      return { ...state.fit };
+    },
+
+    /* What the bolted-on boards are showing. The API writes through
+       here so that one place knows the shapes. */
+    show: () => state.show
+  };
+}
+
+/* ---------------------------------------------------------------------
+   The blank state of every add-on display. One function, called at
+   birth and at Reset, so the two can never drift apart. */
+function freshShow() {
+  return {
+    matrix: { px: new Array(25).fill(null), bright: 40, dirty: false },
+    bitface: { eyeL: null, eyeR: null, nose: null, mouth: null, bright: 40 },
+    oled: { lines: [], px: null, invert: false, zoom: false, dirty: false },
+    talon: { open: 0 },
+    servo: { P1: null, P2: null, deadband: 5 },
+    ir: { code: 0, key: null, at: 0 }
+  };
+}
+
+function copyShow(sh) {
+  return {
+    matrix: { ...sh.matrix, px: sh.matrix.px.slice() },
+    bitface: { ...sh.bitface },
+    oled: { ...sh.oled, lines: sh.oled.lines.slice(),
+            px: sh.oled.px ? sh.oled.px.slice() : null },
+    talon: { ...sh.talon },
+    servo: { ...sh.servo,
+             P1: sh.servo.P1 ? { ...sh.servo.P1 } : null,
+             P2: sh.servo.P2 ? { ...sh.servo.P2 } : null },
+    ir: { ...sh.ir }
   };
 }

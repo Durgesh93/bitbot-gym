@@ -14,6 +14,76 @@ describe("the room", () => {
     expect(room.env().name).toBe("Classroom");
   });
 
+  /* ---- THE ROOM IS THE SHAPE OF THE SCREEN ---------------------------
+
+     The gym stretches the room to whatever shape the canvas is, so these
+     are the things that have to survive a reshape: the walls move, and
+     everything that was in the room is still in it afterwards. A robot
+     left outside the walls can never be driven back in, because the wall
+     is in the way from that side too. */
+  describe("reshaping the room to the screen", () => {
+    it("says how wide and how deep it is, both in the snapshot", () => {
+      const s = room.snapshot();
+      expect(s.w).toBe(2000);
+      expect(s.h).toBe(2000);
+    });
+
+    it("moves the walls when it is told a new shape", () => {
+      /* the furniture out of the way, so the only thing a ray can meet is
+         a wall, and measured from a spot that stays put */
+      bus.send(ROOM, { cmd: "empty" });
+      const at = { x: 1200, y: 1000 };
+      expect(bus.send(ROOM, { cmd: "ray", from: at, angle: 0 })).toBeCloseTo(800, -1);
+      bus.send(ROOM, { cmd: "reshape", w: 3400, h: 2000 });
+      expect(room.snapshot()).toMatchObject({ w: 3400, h: 2000 });
+      /* east is further away now and south is exactly where it was */
+      expect(bus.send(ROOM, { cmd: "ray", from: at, angle: 0 })).toBeCloseTo(2200, -1);
+      expect(bus.send(ROOM, { cmd: "ray", from: at, angle: Math.PI / 2 })).toBeCloseTo(1000, -1);
+    });
+
+    /* A REAL HC-SR04 GIVES UP AT ABOUT TWO AND A HALF METRES, and in a
+       room wider than that the far wall is simply out of range. That is
+       the sensor telling the truth, not the reshape going wrong, and it
+       is worth a test of its own so nobody "fixes" it later. */
+    it("leaves the far wall out of the sonar's reach in a wide room", () => {
+      bus.send(ROOM, { cmd: "empty" });
+      bus.send(ROOM, { cmd: "reshape", w: 3400, h: 2000 });
+      expect(bus.send(ROOM, { cmd: "ray", from: { x: 200, y: 1000 }, angle: 0 }))
+        .toBe(Infinity);
+    });
+
+    it("keeps every robot inside when the room narrows", () => {
+      bus.send(ROOM, { cmd: "reshape", w: 3400, h: 2000 });
+      const id = bus.send(ROOM, { cmd: "add" });
+      bus.send(ROOM, { cmd: "place", id, x: 3200, y: 1000 });
+      bus.send(ROOM, { cmd: "reshape", w: 2000, h: 2000 });
+      const b = room.bodies().find(x => x.id === id);
+      expect(b.x).toBeLessThan(2000);
+      expect(b.x).toBeGreaterThan(0);
+    });
+
+    it("keeps the furniture inside too, and the lamps", () => {
+      bus.send(ROOM, { cmd: "reshape", w: 3400, h: 2000 });
+      bus.send(ROOM, { cmd: "thing", name: "chair", x: 3100, y: 1000, centred: true });
+      bus.send(ROOM, { cmd: "addLamp", x: 3300, y: 900 });
+      bus.send(ROOM, { cmd: "reshape", w: 2000, h: 2000 });
+      const s = room.snapshot();
+      for (const f of s.furniture) expect(f.x + f.w).toBeLessThanOrEqual(2000);
+      for (const L of s.lamps) expect(L.x).toBeLessThanOrEqual(2000);
+    });
+
+    it("does nothing at all when the shape has not changed", () => {
+      expect(bus.send(ROOM, { cmd: "reshape", w: 2000, h: 2000 })).toBe(false);
+    });
+
+    it("still answers for light and sound in the new far corner", () => {
+      bus.send(ROOM, { cmd: "reshape", w: 3400, h: 2000 });
+      const at = { x: 3200, y: 1800 };
+      expect(Number.isFinite(bus.send(ROOM, { cmd: "light", at, opts: eye(0) }))).toBe(true);
+      expect(Number.isFinite(bus.send(ROOM, { cmd: "sound", at }))).toBe(true);
+    });
+  });
+
   it("refuses a scene that does not exist, by name", () => {
     expect(() => room.open("mars")).toThrow(/no scene called mars/);
   });

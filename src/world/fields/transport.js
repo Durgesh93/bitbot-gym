@@ -141,37 +141,51 @@ export function crossing(a, b, box) {
    both fields with nothing in common but the shape of the room. */
 export function surfacesOf(scene, give, opts) {
   const o = opts || {};
-  const S = scene.size;
+  const RW = scene.w == null ? scene.size : scene.w;
+  const RH = scene.h == null ? (scene.size == null ? RW : scene.size) : scene.h;
   const H = o.height == null ? ROOM_HEIGHT : o.height;
   const indoor = o.indoor !== false;
-  const N = o.floor || 6;                    // floor and ceiling are N x N
-  const M = o.wall || 6;                     // each wall is M strips
+  /* N patches along the LONG side, and as many along the short one as
+     keeps the patches square. The room is not square any more and a fixed
+     N x N would stretch every floor patch with it - a wide room would be
+     modelled as a few long thin slabs, which is the one shape a patch
+     model is bad at. */
+  const N = o.floor || 6;
+  const M = o.wall || 6;
+  const span = Math.max(RW, RH);
+  const Nx = Math.max(2, Math.round(N * RW / span));
+  const Ny = Math.max(2, Math.round(N * RH / span));
+  const Mx = Math.max(2, Math.round(M * RW / span));
+  const My = Math.max(2, Math.round(M * RH / span));
   const out = [];
   const add = (x, y, z, nx, ny, nz, mm2, g, owner) => {
     if (g > 0.01 && mm2 > 0) out.push({ x, y, z, nx, ny, nz, A: mm2 / 1e6, g, owner, B: 0, E: 0 });
   };
 
-  const cell = S / N, area = cell * cell;
+  const cw = RW / Nx, ch = RH / Ny, area = cw * ch;
   /* The ceiling is its own surface and not just another wall. In a school
      it is the one that has been treated - acoustic tile, because the
      regulations say so - and it is the single biggest thing deciding
      whether a classroom rings. */
   const gFloor = give.ground, gWall = give.walls;
   const gCeil = give.ceiling == null ? give.walls : give.ceiling;
-  for (let i = 0; i < N; i++) {
-    for (let j = 0; j < N; j++) {
-      add(cell * (i + 0.5), cell * (j + 0.5), 0, 0, 0, 1, area, gFloor, null);
-      if (indoor) add(cell * (i + 0.5), cell * (j + 0.5), H, 0, 0, -1, area, gCeil, null);
+  for (let i = 0; i < Nx; i++) {
+    for (let j = 0; j < Ny; j++) {
+      add(cw * (i + 0.5), ch * (j + 0.5), 0, 0, 0, 1, area, gFloor, null);
+      if (indoor) add(cw * (i + 0.5), ch * (j + 0.5), H, 0, 0, -1, area, gCeil, null);
     }
   }
   if (indoor) {
-    const wide = S / M, face = wide * H;
-    for (let k = 0; k < M; k++) {
-      const c = wide * (k + 0.5);
+    const alongX = RW / Mx, alongY = RH / My;
+    for (let k = 0; k < Mx; k++) {
+      const c = alongX * (k + 0.5), face = alongX * H;
       add(c, 2, H / 2, 0, 1, 0, face, gWall, null);          // the north wall looks south
-      add(c, S - 2, H / 2, 0, -1, 0, face, gWall, null);
+      add(c, RH - 2, H / 2, 0, -1, 0, face, gWall, null);
+    }
+    for (let k = 0; k < My; k++) {
+      const c = alongY * (k + 0.5), face = alongY * H;
       add(2, c, H / 2, 1, 0, 0, face, gWall, null);
-      add(S - 2, c, H / 2, -1, 0, 0, face, gWall, null);
+      add(RW - 2, c, H / 2, -1, 0, 0, face, gWall, null);
     }
   }
 
@@ -247,12 +261,12 @@ function pairs(P, sight) {
 
    Three weights per pair, not one: the scalar, and the direction it came
    from, so a tilted sensor can tell left from right. See `sample`. */
-function gathers(P, scene, sight, G, cellmm, z, closed) {
+function gathers(P, scene, sight, Gx, Gy, cw, ch, z, closed) {
   const rows = [];
   const at = { x: 0, y: 0, z: z };
-  for (let gy = 0; gy < G; gy++) {
-    for (let gx = 0; gx < G; gx++) {
-      at.x = cellmm * (gx + 0.5); at.y = cellmm * (gy + 0.5);
+  for (let gy = 0; gy < Gy; gy++) {
+    for (let gx = 0; gx < Gx; gx++) {
+      at.x = cw * (gx + 0.5); at.y = ch * (gy + 0.5);
       const r = [];
       for (let i = 0; i < P.length; i++) {
         const p = P[i];
@@ -306,13 +320,21 @@ export function prepare(scene, give, boxes, opts) {
   const o = opts || {};
   const sight = makeSight(boxes);
   const P = surfacesOf(scene, give, o);
+  /* G cells along the LONG side, and square cells, so a wide room gets
+     more of them across rather than wider ones. `carve` does the same
+     thing for the sound grid and for the same reason. */
   const G = o.grid || 14;
-  const cellmm = scene.size / G;
+  const RW = scene.w == null ? scene.size : scene.w;
+  const RH = scene.h == null ? (scene.size == null ? RW : scene.size) : scene.h;
+  const want = Math.max(RW, RH) / G;
+  const Gx = Math.max(2, Math.round(RW / want));
+  const Gy = Math.max(2, Math.round(RH / want));
+  const cw = RW / Gx, ch = RH / Gy;
   return {
     P: P, rows: pairs(P, sight),
-    gather: gathers(P, scene, sight, G, cellmm, o.z == null ? 40 : o.z,
+    gather: gathers(P, scene, sight, Gx, Gy, cw, ch, o.z == null ? 40 : o.z,
                     o.indoor !== false),
-    G: G, cell: cellmm, size: scene.size
+    Gx: Gx, Gy: Gy, cw: cw, ch: ch, w: RW, h: RH
   };
 }
 
@@ -346,7 +368,7 @@ export function illuminate(prep, incident, bounces) {
      sixty times a second gets an interpolated read instead of a hundred
      rays. The SHARP part, straight from the source, is never baked: it stays
      exact, per query, in the field that owns it. */
-  const N = prep.G * prep.G;
+  const N = prep.Gx * prep.Gy;
   const sc = new Float32Array(N), vx = new Float32Array(N),
         vy = new Float32Array(N), vz = new Float32Array(N);
   for (let c = 0; c < N; c++) {
@@ -359,7 +381,8 @@ export function illuminate(prep, incident, bounces) {
     }
     sc[c] = s; vx[c] = ax; vy[c] = ay; vz[c] = az;
   }
-  return { G: prep.G, cell: prep.cell, size: prep.size, s: sc, vx: vx, vy: vy, vz: vz };
+  return { Gx: prep.Gx, Gy: prep.Gy, cw: prep.cw, ch: prep.ch,
+           w: prep.w, h: prep.h, s: sc, vx: vx, vy: vy, vz: vz };
 }
 
 /* Read the bake back, between the grid points. Bilinear, because a seam
@@ -387,12 +410,12 @@ export function illuminate(prep, incident, bounces) {
    S, the same answer whichever way you hold it. */
 export function sample(b, x, y, normal) {
   if (!b) return 0;
-  const G = b.G;
-  let fx = x / b.cell - 0.5, fy = y / b.cell - 0.5;
-  fx = Math.max(0, Math.min(G - 1.001, fx));
-  fy = Math.max(0, Math.min(G - 1.001, fy));
+  const Gx = b.Gx, Gy = b.Gy;
+  let fx = x / b.cw - 0.5, fy = y / b.ch - 0.5;
+  fx = Math.max(0, Math.min(Gx - 1.001, fx));
+  fy = Math.max(0, Math.min(Gy - 1.001, fy));
   const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0;
-  const i00 = y0 * G + x0, i10 = i00 + 1, i01 = i00 + G, i11 = i01 + 1;
+  const i00 = y0 * Gx + x0, i10 = i00 + 1, i01 = i00 + Gx, i11 = i01 + 1;
   const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
   const mix = a => a[i00] * w00 + a[i10] * w10 + a[i01] * w01 + a[i11] * w11;
   const s = mix(b.s);

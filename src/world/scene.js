@@ -75,7 +75,20 @@ export const CATALOGUE = {
 
 const DEFAULTS = {
   name: "Room",
-  size: 2000,
+  /* THE ROOM IS A RECTANGLE, and `w` and `h` are its sides in millimetres.
+
+     It was one number, `size`, and the room was square. That is a tidy
+     model and the wrong shape: every screen this runs on is wider than it
+     is tall, so a square room left a strip of nothing down each side of
+     the picture and the floor the children actually got was the height of
+     the window. The gym now reshapes the room to the shape of the canvas,
+     which is why these are two numbers.
+
+     `size` is still read when a scene or a saved project gives it - every
+     .gym.json written before today says `size: 2000` and means a square
+     room - so old files still open, as the room they were saved as. */
+  w: 2000,
+  h: 2000,
   walls: true,
   ground: { material: "lino" },
   /* `walls` is how much light the walls and ceiling throw back and
@@ -129,7 +142,8 @@ export function loadScene(data) {
   const d = data || {};
   const s = {
     name: d.name || DEFAULTS.name,
-    size: d.size == null ? DEFAULTS.size : d.size,
+    w: d.w == null ? (d.size == null ? DEFAULTS.w : d.size) : d.w,
+    h: d.h == null ? (d.size == null ? DEFAULTS.h : d.size) : d.h,
     walls: d.walls == null ? true : !!d.walls,
     ground: { ...DEFAULTS.ground, ...(d.ground || {}) },
     sky: { ...DEFAULTS.sky, ...(d.sky || {}) },
@@ -144,7 +158,12 @@ export function loadScene(data) {
     start: (d.start || DEFAULTS.start).map(start)
   };
 
-  if (!(s.size > 200)) fail("the room is " + s.size + " mm across, which is smaller than the robot");
+  if (!(s.w > 200)) fail("the room is " + s.w + " mm across, which is smaller than the robot");
+  if (!(s.h > 200)) fail("the room is " + s.h + " mm deep, which is smaller than the robot");
+  /* Everything that wants ONE number off the room wants the long way
+     across it: how far a light can reach, how far a radio carries, how
+     coarse a grid may be and still cover the floor. */
+  s.span = Math.max(s.w, s.h);
   if (!MATERIALS[s.ground.material]) {
     fail("the ground is \"" + s.ground.material + "\", which is not a material I know ("
          + Object.keys(MATERIALS).join(", ") + ")");
@@ -261,8 +280,8 @@ export function scatterThings(scene, rng, how_many) {
     for (let go = 0; go < 20; go++) {
       const o = makeThing({
         name: name,
-        x: 180 + rng.next() * (scene.size - 360 - base.w),
-        y: 180 + rng.next() * (scene.size - 360 - base.h),
+        x: 180 + rng.next() * (scene.w - 360 - base.w),
+        y: 180 + rng.next() * (scene.h - 360 - base.h),
         rot: rng.next() < 0.5 ? 0 : Math.PI / 2
       });
       if (clash(o)) continue;

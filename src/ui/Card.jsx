@@ -118,9 +118,16 @@ export default function Card({ body, post, log, compact, onToggle, onCode }) {
         <div className={"lastsaid" + (last && last.cls === "err" ? " bad" : "")}>
           {last ? last.msg : "\u2014"}
         </div>
+        {/* THE SAME FOUR BUTTONS AS AN OPEN CARD, in the same order. The
+            folded card used to drop Reset to save width, and the result
+            was that a robot's buttons changed depending on whether its
+            card happened to be open - so a teacher saying "press Reset"
+            was right for some children and wrong for others. Width is
+            cheaper than that. */}
         <div className="run">
           <button className="go" onClick={() => send({ cmd: "run" })}>Play</button>
           <button onClick={() => send({ cmd: "stop" })}>Stop</button>
+          <button onClick={() => send({ cmd: "reset" })}>Reset</button>
           <button className="code" onClick={() => onCode(body.id)}>Code</button>
         </div>
       </div>
@@ -135,6 +142,12 @@ export default function Card({ body, post, log, compact, onToggle, onCode }) {
           work happens in: this robot needs a program, so open the blocks
           for THIS robot. Hunting for a board number in a dropdown on
           another page was the step everybody got wrong. */}
+      {/* THERE IS NO REMOVE BUTTON ON A CARD ANY MORE. Taking a robot out
+          of the room is done where the robot is: click it on the floor and
+          the menu that opens says "Take it out of the room". A card is for
+          running the thing and watching it, and a delete button sitting
+          among Play and Reset is a delete button a nine-year-old will one
+          day press instead of Stop. */}
       <div className="run">
         <button className="go" onClick={() => send({ cmd: "run" })}>Play</button>
         <button onClick={() => send({ cmd: "stop" })}>Stop</button>
@@ -191,12 +204,6 @@ export default function Card({ body, post, log, compact, onToggle, onCode }) {
           : said.slice(-40).map(l => <div key={l.k} className={l.cls}>{l.msg}</div>)}
       </div>
 
-      {/* No "take the board off" any more. A thing in the room is a Bit:Bot
-          or it is a micro:bit, decided when it is put there - two kinds,
-          not one kind with a switch on it. */}
-      <div className="press last">
-        <button className="quiet" onClick={() => send({ cmd: "remove" })}>remove</button>
-      </div>
     </div>
   );
 }

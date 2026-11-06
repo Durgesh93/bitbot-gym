@@ -24,6 +24,18 @@ const FLOOR = 0.1;             // how dark the PICTURE may get; see paintLight
 
 let ctx = null;                // the canvas being drawn on, and mm -> px
 let S = 1;                     // (module-level so the ported art can see them)
+/* HOW TALL THE CANVAS IS, and how big a letter should be on it.
+
+   The room is a rectangle now and the canvas is the same rectangle, so a
+   lot of code that said `W` and meant "the far edge" was only ever right
+   while the two were equal. `CH` is that far edge downwards.
+
+   `UNIT` is the text scale, and it is the SHORT side rather than the
+   width, because that is what decides how much room there is for a label
+   to sit in. Scaling names off the width meant a wide, shallow room drew
+   its labels tall enough to overlap each other. */
+let CH = 1;
+let UNIT = 1;
 
 /* EVERY LABEL IN THE ROOM, AS BOXES, FOR THE FRAME BEING DRAWN.
 
@@ -504,6 +516,52 @@ function drawTurnPoint(p) {
   ctx.lineWidth = 1.8; ctx.stroke();
 }
 
+/* WHAT IS PICKED UP RIGHT NOW.
+
+   One thing at a time wears this, and it is the thing the arrow keys will
+   move. It matters more than it looks: the keyboard is invisible, so
+   without a mark on the canvas saying WHICH object is listening, a child
+   presses an arrow, something across the room twitches, and the room has
+   become haunted.
+
+   Drawn as a dashed ring rather than a filled halo so that it reads over
+   a bright floor and a dark one alike, and so it cannot be mistaken for
+   the glow of a lamp. */
+function drawPicked(snap, sel) {
+  if (!sel) return;
+  let cx, cy, r, turn = null;
+  if (sel.kind === "body") {
+    const b = (snap.bodies || []).find(x => x.id === sel.id);
+    if (!b) return;
+    cx = b.x; cy = b.y; r = b.r + 26; turn = turnPointOf({ body: b });
+  } else if (sel.kind === "thing") {
+    const f = (snap.furniture || []).find(x => x.uid === sel.uid);
+    if (!f) return;
+    cx = f.x + f.w / 2; cy = f.y + f.h / 2;
+    r = Math.hypot(f.w, f.h) / 2 + 16; turn = turnPointOf({ thing: f });
+  } else if (sel.kind === "lamp") {
+    const L = (snap.lamps || [])[sel.index];
+    if (!L) return;
+    cx = L.x; cy = L.y; r = 74;
+  } else if (sel.kind === "magnet") {
+    const M = (snap.magnets || [])[sel.index];
+    if (!M) return;
+    cx = M.x; cy = M.y; r = 86;
+  } else return;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx * S, cy * S, r * S, 0, 7);
+  ctx.setLineDash([7, 5]);
+  ctx.lineWidth = 2.4;
+  ctx.strokeStyle = "rgba(255,214,64,0.95)";
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  if (turn) drawTurnPoint(turn);
+}
+
 /* WHERE IT HAS JUST BEEN.
 
    A Bit:Bot turning on the spot and a Bit:Bot sitting still look identical
@@ -605,7 +663,7 @@ const SONAR_STEP = 0.044;      // radians between them: a 15-degree cone in all
 const SONAR_FWD = 62;          // where the sonar sits, forward of the middle
 
 function bubble(text, x, y, colour, W) {
-  const f = Math.round(11 * (W / 620));
+  const f = Math.round(11 * UNIT);
   ctx.font = "600 " + f + "px system-ui, sans-serif";
   const w = ctx.measureText(text).width + f * 1.1, h = f * 1.9;
   ctx.fillStyle = "rgba(10,13,20,0.82)";
@@ -720,8 +778,8 @@ function drawOverlay(snap, show, W, probe) {
      place and you can read none of them. So a whole stack is measured and
      pushed down past the stacks already placed, exactly the way the names
      are - top to bottom, so the push is always onto emptier floor. */
-  const gap = 17 * (W / 620);
-  const cf = Math.round(11 * (W / 620));            // the same size `bubble` uses
+  const gap = 17 * UNIT;
+  const cf = Math.round(11 * UNIT);            // the same size `bubble` uses
   ctx.font = "600 " + cf + "px system-ui, sans-serif";
   const stacks = [...said.entries()].map(([b, items]) => {
     const w = Math.max(...items.map(it => ctx.measureText(it.text).width)) + cf * 1.1;
@@ -741,7 +799,7 @@ function drawOverlay(snap, show, W, probe) {
      and not after: flipping one up at the end dropped it on top of
      whatever was already up there, which is the mess this pass exists to
      prevent. */
-  for (const st of stacks) if (st.y + st.h > W - 34) st.y = Math.max(2, st.roof - st.h);
+  for (const st of stacks) if (st.y + st.h > CH - 34) st.y = Math.max(2, st.roof - st.h);
   stacks.sort((p, q) => p.y - q.y);
   /* starting from the names, which are already on the glass */
   const down = labelBoxes.slice();
@@ -761,15 +819,15 @@ function drawOverlay(snap, show, W, probe) {
   if (show.light) on.push("light sensors, 0 to 1023");
   if (show.sonar) on.push("a 15\u00b0 cone of pings, red found nothing");
   const note = "Showing: " + on.join("   \u00b7   ");
-  const f = Math.round(12 * (W / 620));
+  const f = Math.round(12 * UNIT);
   ctx.save();
   ctx.font = "600 " + f + "px system-ui, sans-serif";
   const w = ctx.measureText(note).width + f * 1.4, h = f * 2.2;
   ctx.fillStyle = "rgba(13,16,23,0.9)";
-  roundRect(10, W - h - 10, w, h, h * 0.35); ctx.fill();
+  roundRect(10, CH - h - 10, w, h, h * 0.35); ctx.fill();
   ctx.fillStyle = "#dfe7f3";
   ctx.textBaseline = "middle";
-  ctx.fillText(note, 10 + f * 0.7, W - h / 2 - 10);
+  ctx.fillText(note, 10 + f * 0.7, CH - h / 2 - 10);
   ctx.restore();
   ctx.textBaseline = "alphabetic";
 }
@@ -830,18 +888,19 @@ export function createRoomRenderer(canvas, probe) {
          how a tall thing's shadow runs on until it meets a wall)
        - minus the quads of the shorter things, whose shadows end. */
   function paintSource(region, S, W, snap, top) {
+    const H = CH;
     const src = region.source;
     octx.setTransform(1, 0, 0, 1, 0, 0);
-    octx.clearRect(0, 0, W, W);
+    octx.clearRect(0, 0, W, H);
 
     if (src.kind === "sun") {
       const base = look(snap.ambient, top);
       const v = Math.round(255 * clamp(look(region.profile.e[0], top) - base, 0, 1));
       octx.fillStyle = "rgba(" + v + "," + Math.round(v * 0.97) + "," + Math.round(v * 0.88) + ",1)";
-      octx.fillRect(0, 0, W, W);
+      octx.fillRect(0, 0, W, H);
     } else {
       octx.fillStyle = glow(octx, src, S, top, snap.ambient, region.profile);
-      octx.fillRect(0, 0, W, W);
+      octx.fillRect(0, 0, W, H);
       if (region.visible && region.visible.length > 2) {
         octx.save();                                    // keep only what the lamp can see
         octx.globalCompositeOperation = "destination-in";
@@ -885,7 +944,7 @@ export function createRoomRenderer(canvas, probe) {
        of a razor. Blurring the finished layer rather than each polygon
        costs one filtered draw a lamp and softens the lit edge too. */
     lctx.globalCompositeOperation = "lighter";
-    lctx.filter = "blur(" + (2.6 * (W / 620)).toFixed(2) + "px)";
+    lctx.filter = "blur(" + (2.6 * UNIT).toFixed(2) + "px)";
     lctx.drawImage(one, 0, 0);
     lctx.filter = "none";
   }
@@ -902,11 +961,11 @@ export function createRoomRenderer(canvas, probe) {
   const tctx = tiny.getContext("2d");
   function paintIndirect(snap, W, top) {
     const g = snap.indirect;
-    if (!g || !g.G) return;
-    const G = g.G;
-    if (tiny.width !== G) { tiny.width = tiny.height = G; }
-    const img = tctx.createImageData(G, G);
-    for (let i = 0; i < G * G; i++) {
+    if (!g || !g.Gx) return;
+    const Gx = g.Gx, Gy = g.Gy;
+    if (tiny.width !== Gx || tiny.height !== Gy) { tiny.width = Gx; tiny.height = Gy; }
+    const img = tctx.createImageData(Gx, Gy);
+    for (let i = 0; i < Gx * Gy; i++) {
       const v = Math.round(255 * clamp(look(g.s[i] / 2, top), 0, 1));
       img.data[i * 4] = v;
       img.data[i * 4 + 1] = Math.round(v * 0.97);
@@ -920,13 +979,15 @@ export function createRoomRenderer(canvas, probe) {
     lctx.imageSmoothingQuality = "high";
     /* half a cell out on every side, so the outermost cell centres land on
        the edge of the room rather than half a cell inside it */
-    const pad = W / (2 * G);
-    lctx.drawImage(tiny, -pad, -pad, W + pad * 2, W + pad * 2);
+    const padX = W / (2 * Gx), padY = CH / (2 * Gy);
+    lctx.drawImage(tiny, -padX, -padY, W + padX * 2, CH + padY * 2);
     lctx.restore();
   }
 
   function paintLight(snap, S, W) {
-    if (lit.width !== W) { lit.width = lit.height = W; one.width = one.height = W; }
+    if (lit.width !== W || lit.height !== CH) {
+      lit.width = W; lit.height = CH; one.width = W; one.height = CH;
+    }
     lctx.setTransform(1, 0, 0, 1, 0, 0);
     lctx.globalCompositeOperation = "source-over";
     /* FLOOR is a drawing choice, not physics. With every lamp off the room
@@ -936,7 +997,7 @@ export function createRoomRenderer(canvas, probe) {
     const top = peak(snap);
     const a = Math.round(255 * clamp(Math.max(FLOOR, look(snap.ambient, top)), 0, 1));
     lctx.fillStyle = "rgb(" + a + "," + Math.round(a * 0.97) + "," + Math.round(a * 0.91) + ")";
-    lctx.fillRect(0, 0, W, W);
+    lctx.fillRect(0, 0, W, CH);
     paintIndirect(snap, W, top);
     for (const region of snap.light) paintSource(region, S, W, snap, top);
     return lit;
@@ -948,14 +1009,22 @@ export function createRoomRenderer(canvas, probe) {
   function draw(snap, opts) {
     const o = opts || {};
     ctx = target;
-    S = canvas.width / snap.size;
+    /* ONE SCALE FOR BOTH AXES. The canvas is kept the same shape as the
+       room, so width/room-width and height/room-height are the same
+       number - and if they ever drift apart by a pixel of rounding, using
+       the width for both is the one choice that cannot put a click
+       somewhere other than where it was aimed. */
+    const roomW = snap.w || snap.size, roomH = snap.h || snap.size;
+    S = canvas.width / roomW;
     const W = canvas.width;
+    CH = canvas.height;
+    UNIT = Math.min(W, CH) / 620;
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, W, W);
+    ctx.clearRect(0, 0, W, CH);
 
     ctx.fillStyle = floorOf(snap.ground || "lino", W);
-    ctx.fillRect(0, 0, W, W);
+    ctx.fillRect(0, 0, W, CH);
 
     for (const l of snap.lines) {                               // tape on the floor
       ctx.strokeStyle = "#15171c";
@@ -976,9 +1045,9 @@ export function createRoomRenderer(canvas, probe) {
 
     /* The furniture goes on its own layer so the same light can fall on it
        more gently - see STANDING. */
-    if (stage.width !== W) stage.width = stage.height = W;
+    if (stage.width !== W || stage.height !== CH) { stage.width = W; stage.height = CH; }
     sctx.setTransform(1, 0, 0, 1, 0, 0);
-    sctx.clearRect(0, 0, W, W);
+    sctx.clearRect(0, 0, W, CH);
     ctx = sctx;
 
     for (const b of snap.furniture) {
@@ -999,7 +1068,7 @@ export function createRoomRenderer(canvas, probe) {
       ctx.restore();
       if (b.name && w > 56) {
         ctx.fillStyle = "rgba(255,255,255,0.6)";
-        ctx.font = Math.round(11 * (W / 620)) + "px system-ui, sans-serif";
+        ctx.font = Math.round(11 * UNIT) + "px system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.fillText(b.name, ox, oy + 4);
         ctx.textAlign = "left";
@@ -1011,7 +1080,7 @@ export function createRoomRenderer(canvas, probe) {
        put back afterwards - otherwise the whole room gets a second coat. */
     octx.setTransform(1, 0, 0, 1, 0, 0);
     octx.globalCompositeOperation = "source-over";
-    octx.clearRect(0, 0, W, W);
+    octx.clearRect(0, 0, W, CH);
     octx.drawImage(stage, 0, 0);
 
     sctx.save();
@@ -1075,14 +1144,14 @@ export function createRoomRenderer(canvas, probe) {
     for (const b of snap.bodies) drawBody(b);
     drawNames(snap.bodies, W);
 
-    /* the turn points, over everything so they are never buried */
-    if (o.handles) {
-      for (const f of snap.furniture) drawTurnPoint(turnPointOf({ thing: f }));
-      for (const b of snap.bodies) drawTurnPoint(turnPointOf({ body: b }));
-    }
+    /* The ring and the turn dot, over everything so they are never buried.
+       ONE object wears them - whichever is picked up. They used to sit
+       beside every object at once, which in a furnished room was a sky
+       full of dots with no way to tell which belonged to what. */
+    drawPicked(snap, o.sel);
     if (snap.sun) drawSun(snap.sun, W);
 
-    const nr = 20 * (W / 620), nx = W - 46 * (W / 620), ny = 46 * (W / 620);
+    const nr = 20 * UNIT, nx = W - 46 * UNIT, ny = 46 * UNIT;
     ctx.save();
     ctx.translate(nx, ny);
     ctx.rotate(MAG_NORTH + Math.PI / 2);
@@ -1093,7 +1162,7 @@ export function createRoomRenderer(canvas, probe) {
     ctx.fillStyle = "rgba(232,87,90,0.85)"; ctx.fill();
     ctx.restore();
     ctx.fillStyle = "rgba(255,255,255,0.65)";
-    ctx.font = "bold " + Math.round(12 * (W / 620)) + "px system-ui, sans-serif";
+    ctx.font = "bold " + Math.round(12 * UNIT) + "px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("N", nx, ny - nr - 3);
     ctx.textAlign = "left";
@@ -1103,10 +1172,16 @@ export function createRoomRenderer(canvas, probe) {
     /* the walls, or a dashed edge when the scene has none */
     if (snap.walls) { ctx.strokeStyle = "#49536a"; ctx.lineWidth = 6; ctx.setLineDash([]); }
     else { ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.lineWidth = 2; ctx.setLineDash([8, 7]); }
-    ctx.strokeRect(3, 3, W - 6, W - 6);
+    /* THE WALLS ARE THE ROOM'S EDGE, not the canvas's. They are nearly
+       the same thing - the canvas is kept the room's shape - but during a
+       resize the canvas changes a frame before the room is told to, and
+       for that one frame a wall drawn round the canvas is a wall in the
+       wrong place. Drawn from the room, it is never wrong. */
+    ctx.strokeRect(3, 3, roomW * S - 6, roomH * S - 6);
     ctx.setLineDash([]);
   }
 
-  const toRoom = (sx, sy, size) => ({ x: sx / canvas.width * size, y: sy / canvas.height * size });
+  const toRoom = (sx, sy, w, h) => ({ x: sx / canvas.width * w,
+                                     y: sy / canvas.height * (h == null ? w : h) });
   return { draw, toRoom };
 }

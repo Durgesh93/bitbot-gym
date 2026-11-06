@@ -36,7 +36,7 @@ export function createSurface(scene) {
   rebuild();
 
   function at(p) {
-    const inside = p.x >= 0 && p.y >= 0 && p.x <= scene.size && p.y <= scene.size;
+    const inside = p.x >= 0 && p.y >= 0 && p.x <= scene.w && p.y <= scene.h;
     for (const l of lines) {
       if (toSegment(p, l.a, l.b) <= l.half) {
         return { material: g.material, reflect: l.reflect, dark: true,

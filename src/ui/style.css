@@ -208,10 +208,6 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; color: var(-
             transition: background .14s, border-color .14s, color .14s; }
 .themebtn:hover { color: var(--accent); border-color: var(--accent); }
 
-/* Which of the two pages you are on. A word, not a tab bar - the arrows
-   do the moving, and this only has to answer "where am I". */
-.gym > header .where { font-size: 12px; color: var(--muted); letter-spacing: .02em;
-                       white-space: nowrap; }
 .gym > header .title { white-space: nowrap; }
 
 /* ---- the menu bar ----------------------------------------------------
@@ -237,6 +233,16 @@ nav.bar::-webkit-scrollbar { display: none; }
 .menubtn i { font-style: normal; font-size: 10px; color: var(--muted); }
 /* what this menu currently HAS ON, said on the outside of it - a mode you
    cannot see is a mode you will forget you are in */
+/* SAVE, sitting in the header beside the Open menu and dressed the same.
+   It is not a menu and it must not look like one, but it has to line up
+   with one, so it borrows the padding and the radius and keeps a border of
+   its own - a lone transparent button reads as a word nobody can press. */
+.hdrbtn { flex: none; white-space: nowrap; cursor: pointer;
+          border: 1px solid var(--line); background: var(--panel); color: var(--fg);
+          border-radius: 9px; padding: 6px 12px; font-size: 13px;
+          transition: background .14s, border-color .14s, color .14s; }
+.hdrbtn:hover { color: var(--accent); border-color: var(--accent); }
+
 .menubtn em { font-style: normal; font-size: 10.5px; font-weight: 700; color: var(--accent);
               background: var(--wait-bg); border: 1px solid var(--wait-line);
               border-radius: 999px; padding: 1px 7px; letter-spacing: .01em; }
@@ -264,10 +270,22 @@ nav.bar::-webkit-scrollbar { display: none; }
 .mitem .what { flex: 1; white-space: nowrap; }
 .mitem .hint { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
 
-.mrow { display: flex; align-items: center; gap: 8px; padding: 5px 9px 6px; }
+.mrow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; row-gap: 5px;
+        padding: 5px 9px 6px; }
 .mrow .mlabel { font-size: 10px; letter-spacing: .09em; text-transform: uppercase;
                 font-weight: 800; color: var(--muted); }
 .mrow select { flex: 1; min-width: 0; }
+/* A ROW OF SMALL BUTTONS INSIDE A MENU. The floor menu carries everything
+   the Build and Robots menus used to, and as full-width items that is a
+   column of fourteen - on a 768-pixel Chromebook, a menu you have to
+   scroll is a menu whose bottom half is never seen. Four words side by
+   side fit on one line and are no harder to hit. */
+.mrow .pill { flex: 0 1 auto; cursor: pointer; white-space: nowrap;
+              border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
+              border-radius: 8px; padding: 5px 9px; font-size: 12px;
+              transition: background .12s, border-color .12s, color .12s; }
+.mrow .pill:hover { color: var(--accent); border-color: var(--accent); background: var(--panel); }
+
 
 .msep { margin: 5px 2px 3px; font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
         font-weight: 800; color: var(--muted); display: flex; align-items: center; gap: 7px; }
@@ -368,24 +386,76 @@ button.go:disabled { background: var(--well); border-color: var(--line);
 
 /* The page turners, at the edges of the window. */
 main { flex: 1 1 auto; min-height: 0; }
-main.tab-room { display: grid; gap: 12px; grid-template-columns: minmax(0, 54fr) minmax(0, 46fr); }
+/* THE ROOM ON TOP, THE ROBOT CARDS UNDER IT, on every screen.
+
+   It used to be two columns side by side, which is handsome on a desk
+   monitor and unusable on the machine the class actually has: a school
+   Chromebook is 1366 by 768 with a shelf across the bottom, so the room
+   and the cards were each squeezed into half a narrow window. One column
+   gives the room its full width and lets the cards run as a grid
+   underneath, where there is as much room as they need. */
+main.tab-room { display: flex; flex-direction: column; gap: 12px; overflow: auto; }
 main.tab-blocks, main.tab-code { display: flex; flex-direction: column; gap: 8px; }
 
 /* ---- the room ------------------------------------------------------- */
 
-.left { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
-/* the room is the whole of its column now that the shared log has gone */
-main.tab-room .left .roomview { flex: 1 1 auto; }
-.roomview { display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1 1 auto; }
-/* The box that owns whatever height the tool rows leave. min-height:0 is
-   the load-bearing line: without it a flex child refuses to shrink below
-   its content and the canvas pushes the tools off the panel. */
-.stage { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; }
-.roomview canvas { width: auto; height: auto; max-width: 100%; max-height: 100%;
-                   border-radius: 12px; background: var(--sunk); display: block; margin: 0 auto;
+.left { display: flex; flex-direction: column; gap: 10px; flex: none; }
+.roomview { display: flex; flex-direction: column; gap: 8px; flex: none; }
+.stage { position: relative; display: flex; justify-content: center; }
+
+/* THE BOX WITH THE GRIP. The room is square, so the canvas takes the
+   smaller side of whatever shape the grip leaves behind and the box is
+   only ever the frame around it.
+
+   The default size is deliberately written in viewport units as well as
+   pixels: on a 768-pixel-high Chromebook, 58vh leaves the menu bar, the
+   hint line and the first row of robot cards all on screen at once, which
+   is the layout a teacher needs to be able to point at. Drag the grip and
+   the inline size wins, and that is what gets remembered. */
+.roomview { --room: min(620px, 58vh); }
+/* THE BOX NEED NOT BE SQUARE ANY MORE, because the room is not. It opens
+   as wide as there is room for and as tall as the screen can spare, and
+   the room is reshaped to match - so the default is a wide floor rather
+   than a square one with a strip of nothing down each side. */
+.canvasbox { width: 100%; height: var(--room); }
+.canvasbox { resize: both; overflow: hidden; flex: none;
+             width: 100%; height: var(--room); max-width: 100%;
+             min-width: 260px; min-height: 260px;
+             display: flex; align-items: center; justify-content: center; }
+/* THE CANVAS STAYS SQUARE WHATEVER SHAPE THE BOX IS DRAGGED INTO. The
+   backing store is square because the room is, so stretching it to fill
+   an oblong box drew a square room as a wide one - every distance on
+   screen a lie, and the sonar cone pointing somewhere the robot was not.
+   auto plus the two maxima letterbox it inside the box instead. */
+/* AND THE CANVAS FILLS THE BOX. It used to be sized `auto` and capped at
+   100%, which is how a square canvas stays square inside a box of any
+   shape; the canvas is now the box's shape, and the backing store is set
+   to the box's pixels, so stretching is not possible. */
+.roomview canvas { display: block; width: 100%; height: 100%;
+                   max-width: 100%; max-height: 100%;
+                   border-radius: 12px; background: var(--sunk);
                    touch-action: none; cursor: grab;
                    box-shadow: 0 10px 30px rgba(26,34,48,.16), 0 0 0 1px var(--line); }
 .roomview canvas:active { cursor: grabbing; }
+
+/* What the keys do, and the one mode the gym has left. Quiet, one line,
+   directly under the room: four arrow keys have to do two jobs on a
+   Chromebook that swallows shift-arrow, so which job they are doing has to
+   be visible and has to be switchable by a finger as well as by the space
+   bar. A touchscreen Chromebook has no keyboard open at all. */
+.keyhint { margin: 0; font-size: 12px; color: var(--ink-2, #7c8699);
+           min-height: 1.3em; display: flex; align-items: center;
+           justify-content: center; gap: 10px; flex-wrap: wrap; }
+.keyhint b { color: var(--ink, #1a2230); font-weight: 650; }
+.keyhint .said { min-width: 0; }
+.modesw { display: inline-flex; flex: none; border: 1px solid var(--line);
+          border-radius: 9px; overflow: hidden; background: var(--panel); }
+.modesw button { cursor: pointer; border: 0; background: transparent; color: var(--muted);
+                 padding: 4px 11px; font-size: 12px; white-space: nowrap;
+                 transition: background .12s, color .12s; }
+.modesw button + button { border-left: 1px solid var(--line); }
+.modesw button:hover { background: var(--panel-2); color: var(--fg); }
+.modesw button.on { background: var(--accent); color: #fff; font-weight: 650; }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: none; }
 /* the tool rows are a palette, so they read as one block rather than as
    two unrelated strips of buttons */
@@ -414,7 +484,9 @@ main.tab-room .left .roomview { flex: 1 1 auto; }
    the cards under it taking whatever height is left. The bar cannot be a
    third child of main.tab-room - that grid has two columns and it would
    land under the room - so the column is its own box. */
-.right { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+/* Under the room now, not beside it, so it takes the height it needs and
+   the page scrolls rather than the card list scrolling inside a box. */
+.right { min-width: 0; display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; }
 
 /* STOP ALL AND RESET ALL, over the cards they act on.
    Not in a menu: this is the button a teacher reaches for while thirty
@@ -429,7 +501,10 @@ main.tab-room .left .roomview { flex: 1 1 auto; }
 .allboards button:first-child:hover { border-color: var(--stop); color: var(--stop); }
 .allboards .hint { margin-left: auto; font-size: 11.5px; }
 
-.cards { flex: 1 1 auto; min-height: 0; overflow: auto; align-content: start; display: grid; gap: 12px;
+/* The whole page scrolls now, so the card grid does not scroll inside
+   itself - a box with its own scrollbar under a room that can be resized
+   to any height is two scrollbars arguing. */
+.cards { flex: 1 1 auto; align-content: start; display: grid; gap: 12px;
          grid-template-columns: repeat(auto-fill, minmax(min(315px, 100%), 1fr));
          padding-right: 2px; }
 .cards .hint { grid-column: 1 / -1; border: 1px dashed var(--line); border-radius: 12px;
@@ -742,12 +817,9 @@ main.tab-room .left .roomview { flex: 1 1 auto; }
    does. Half-undoing it is what put the log on top of the room.
    =========================================================================== */
 
-/* WHAT GIVES WAY FIRST, as the window narrows. The menus are the last
-   thing to go because they are the only way to do anything; the page label
-   and the second half of the title are decoration and go first. */
-@media (max-width: 860px) {
-  .gym > header .where { display: none; }
-}
+/* WHAT GIVES WAY FIRST, as the window narrows. The menu, Save and Open are
+   the last things to go because they are the only way to do anything; the
+   second half of the title is decoration and goes first. */
 @media (max-width: 620px) {
   body { padding: 10px 34px; }
   .gym > header { gap: 6px 8px; }
@@ -762,19 +834,22 @@ main.tab-room .left .roomview { flex: 1 1 auto; }
   body { padding: 10px 28px; }
 }
 
+/* This used to be where the two columns collapsed into one on a narrow
+   window. They are one column at every width now, so all that is left is
+   giving the gutters back: on a small screen the page turners are gone
+   and the room wants the pixels more than the margin does. */
 @media (max-width: 1080px) {
-  html, body { height: auto; }
-  body { padding: 12px 44px; }
-  body { overflow: auto; display: block; }
-  #app, .gym, main { height: auto; min-height: 0; display: block; }
-  .gym > header { display: flex; }
-  main.tab-room, .left, .right, .roomview, .stage { display: block; }
-  .allboards { display: flex; margin-bottom: 10px; }
-  .roomview canvas { max-height: 62vh; margin: 0 auto 10px; }
-  .tools { display: flex; margin-bottom: 10px; }
-  .log { height: 96px; margin-bottom: 12px; }
-  .cards { overflow: visible; }
-  .right { min-height: 0; }
+  body { padding: 12px 20px; }
+}
+/* A SHORT SCREEN IS THE CHROMEBOOK CASE and it has nothing to do with
+   width: 1366 by 768 is a wide window and a shallow one. Give the room
+   less of the height by default so the first robot card is on screen
+   under it, and the grip is still there for anyone who wants more. */
+@media (max-height: 820px) {
+  .roomview { --room: min(620px, 52vh); }
+}
+@media (max-height: 680px) {
+  .roomview { --room: min(620px, 46vh); }
 }
 
 /* The tick on the magnetometer where the Earth's own field sits, so the
@@ -800,3 +875,34 @@ main.tab-room .left .roomview { flex: 1 1 auto; }
 .notice.bad { background: #fdeceb; border-color: #e7a9a3; color: #8a2419; }
 :root[data-theme="dark"] .notice.bad { background: #3a1c18; border-color: #6d2f27;
                                        color: #ff9a9a; }
+
+/* THE SAVE BOX -------------------------------------------------------
+
+   The browser's own prompt can be turned off by the browser, and when it
+   is, it does not fail loudly - it returns null and the button looks
+   broken. So the one question the gym asks is asked on the page. It is
+   small, it is centred, and it reads as a question with two answers: the
+   dark button does the thing, the plain one walks away. */
+.shade { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center;
+         background: rgba(14, 18, 24, .34); backdrop-filter: blur(2px);
+         animation: fadein .12s ease both; }
+:root[data-theme="dark"] .shade { background: rgba(0, 0, 0, .52); }
+
+.namebox { width: min(420px, calc(100vw - 32px)); box-sizing: border-box;
+           background: var(--panel); border: 1px solid var(--line);
+           border-radius: 14px; padding: 18px 18px 14px;
+           box-shadow: 0 18px 44px rgba(0, 0, 0, .22);
+           animation: arrive .18s var(--spring) both; }
+.namebox h2 { margin: 0 0 10px; font-size: 15px; font-weight: 650; color: var(--fg); }
+.namebox input { width: 100%; box-sizing: border-box; font: inherit; font-size: 15px;
+                 padding: 9px 11px; border-radius: 10px; color: var(--fg);
+                 border: 1px solid var(--line-2); background: var(--well); }
+.namebox input:focus { outline: 2px solid var(--accent); outline-offset: 1px;
+                       border-color: var(--accent); }
+.namebox .small { margin: 9px 2px 0; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.namerow { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.hdrbtn.go { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 650; }
+.hdrbtn.go:hover { color: #fff; filter: brightness(1.07); }
+.hdrbtn.go:disabled { opacity: .45; cursor: default; filter: none; }
+
+@keyframes fadein { from { opacity: 0 } to { opacity: 1 } }

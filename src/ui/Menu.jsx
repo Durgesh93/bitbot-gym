@@ -120,9 +120,14 @@ export function Menu({ label, chip, children }) {
 /* One command. `on` draws the tick - used for both "this is the live
    tool" and "this view is showing", because to a child those are the same
    idea and deserve the same mark. */
-export function Item({ on, onClick, hint, children }) {
+/* `keepOpen` is for the rare item that arms something inside the menu
+   rather than doing it - "Forget a saved project" turns the list below it
+   into a list of things to forget, and a menu that shut at that moment
+   would look like a button that did nothing. */
+export function Item({ on, onClick, hint, keepOpen, children }) {
   return (
-    <button className={"mitem" + (on ? " on" : "")} role="menuitem" onClick={onClick}>
+    <button className={"mitem" + (on ? " on" : "")} role="menuitem"
+            onClick={e => { if (keepOpen) e.stopPropagation(); if (onClick) onClick(e); }}>
       <span className="tick" aria-hidden="true">{on ? "✓" : ""}</span>
       <span className="what">{children}</span>
       {hint && <span className="hint">{hint}</span>}

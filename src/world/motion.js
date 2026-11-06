@@ -70,17 +70,29 @@ export function createMotion(scene) {
 
   for (const f of scene.furniture) addThing(f);
 
-  if (scene.walls) {
-    const S = scene.size, h = WALL / 2;
+  /* FOUR WALLS ROUND A RECTANGLE, and they are built in a function rather
+     than inline because the room can be reshaped now: the gym stretches it
+     to the shape of the canvas, and when it does, the old walls have to
+     come out before the new ones go in. A wall left behind is an invisible
+     line across the floor that a robot bumps into for no reason anybody
+     can see. */
+  const walls = [];
+  function buildWalls() {
+    for (const b of walls) Composite.remove(engine.world, b);
+    walls.length = 0;
+    if (!scene.walls) return;
+    const W = scene.w, H = scene.h, t = WALL / 2;
     for (const [x, y, w, hh] of [
-      [S / 2, -h, S + WALL * 2, WALL], [S / 2, S + h, S + WALL * 2, WALL],
-      [-h, S / 2, WALL, S + WALL * 2], [S + h, S / 2, WALL, S + WALL * 2]
+      [W / 2, -t, W + WALL * 2, WALL], [W / 2, H + t, W + WALL * 2, WALL],
+      [-t, H / 2, WALL, H + WALL * 2], [W + t, H / 2, WALL, H + WALL * 2]
     ]) {
       const b = Bodies.rectangle(x, y, w, hh, { isStatic: true });
       b.plugin = { kind: "wall" };
       Composite.add(engine.world, b);
+      walls.push(b);
     }
   }
+  buildWalls();
 
   /* ---- bodies ---------------------------------------------------------- */
 
@@ -266,9 +278,8 @@ export function createMotion(scene) {
   }
 
   function wallNormal(x, y) {
-    const S = scene.size;
     if (y <= 1) return { x: 0, y: 1 };
-    if (y >= S - 1) return { x: 0, y: -1 };
+    if (y >= scene.h - 1) return { x: 0, y: -1 };
     if (x <= 1) return { x: 1, y: 0 };
     return { x: -1, y: 0 };
   }
@@ -311,6 +322,6 @@ export function createMotion(scene) {
   }
 
   return { add, remove, resize, setGrip, grip: () => grip, hold, place, drive, step, bodies, bodyOf, raycast, contacts, occluders,
-           addThing, removeThing, clearThings, thingAt,
-           engine, size: () => scene.size };
+           addThing, removeThing, clearThings, thingAt, buildWalls,
+           engine, size: () => Math.max(scene.w, scene.h) };
 }

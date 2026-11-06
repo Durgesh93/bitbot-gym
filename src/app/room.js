@@ -27,6 +27,8 @@ import * as bitbot from "../hardware/bitbot.js";
 import * as microbit from "../hardware/microbit.js";
 import { createBoard } from "../hardware/microbit.js";
 import { createChassis } from "../hardware/bitbot.js";
+import { ADDONS, IR_BY_ID, IR_REACH, IR_CONE } from "../hardware/addons.js";
+import { say } from "../core/log.js";
 import { createMachine } from "./machine.js";
 
 /* Every kind of chassis that can be put in the room: where its senses are,
@@ -145,7 +147,7 @@ export function createRoom(options) {
   function clearOf(at, r) {
     const spot = { ...at };
     if (!at) return spot;
-    const size = env.size;
+    const RW = env.w, RH = env.h;
     const place = (gap) => {
       const free = (x, y) => env.bodies().every(b =>
         Math.hypot(b.x - x, b.y - y) > b.r + r + gap);
@@ -154,16 +156,17 @@ export function createRoom(options) {
       /* the margin is the LABELS' and not the body's: a robot hard against
          the wall has nowhere to draw its name */
       const edge = r + (gap > 60 ? 130 : 10);
-      const inside = v => v > edge && v < size - edge;
+      const insideX = v => v > edge && v < RW - edge;
+      const insideY = v => v > edge && v < RH - edge;
       /* away from whichever wall the start pose is nearest */
-      const stepX = spot.x < size / 2 ? pitch : -pitch;
-      const stepY = spot.y < size / 2 ? pitch : -pitch;
+      const stepX = spot.x < RW / 2 ? pitch : -pitch;
+      const stepY = spot.y < RH / 2 ? pitch : -pitch;
       for (let row = 0; row < 10; row++) {
         const y = spot.y + stepY * row;
-        if (!inside(y)) break;
+        if (!insideY(y)) break;
         for (let col = 0; col < 14; col++) {
           const x = spot.x + stepX * col;
-          if (!inside(x)) break;
+          if (!insideX(x)) break;
           if ((row || col) && free(x, y)) return { ...at, x: x, y: y };
         }
       }
@@ -393,6 +396,13 @@ export function createRoom(options) {
       case "hold":  return env.holdBody(m.id, true);
       case "drop":  return env.holdBody(m.id, false);
       case "place": return env.placeBody(m.id, m.x, m.y, m.heading);
+
+      /* THE ROOM IS THE SHAPE OF THE SCREEN. The gym says so whenever the
+         canvas changes shape, and the room is the thing that moves its
+         walls - not the picture, which only ever draws what it is given.
+         Posted like every other hand-driven change, so it lands between
+         ticks rather than halfway through one. */
+      case "reshape": return env.reshape(m.w, m.h);
       /* The motors, as a percentage, exactly as the blocks set them. The
          chassis turns that into millimetres per second on the next tick. */
       case "drive": { const k = kit.get(m.id); if (!k) return false;
@@ -433,6 +443,74 @@ export function createRoom(options) {
         k.machine.fire(m.name);
         return true;
       }
+      /* BOLTING A BOARD ON AND TAKING IT OFF.
+
+         Refuses what the model cannot take and what collides with
+         something already fitted, and says which, so the menu can
+         explain itself. `m.on` left out asks instead of changing. */
+      case "fit": {
+        const k = kit.get(m.id);
+        if (!k) return false;
+        if (m.on == null) return k.chassis.fit(m.addon);
+        const out = k.chassis.fit(m.addon, !!m.on);
+        if (out && out.ok) {
+          const a = ADDONS.find(x => x.id === m.addon);
+          say((a ? a.name : m.addon) + (m.on ? " fitted to " : " taken off ") +
+              k.machine.name(), "say");
+        }
+        return out;
+      }
+      case "fitting": { const k = kit.get(m.id); return k ? k.chassis.fitting() : null; }
+      case "model": {
+        const k = kit.get(m.id);
+        if (!k) return null;
+        if (m.model) k.chassis.model(m.model);
+        return k.chassis.model();
+      }
+
+      /* A KEY ON THE REMOTE.
+
+         Infra-red is light you cannot see, so the gym treats it as
+         light: it goes in a straight line, it is blocked by a chair,
+         and it peters out. Every robot with a receiver fitted that can
+         actually see the remote hears the code; the rest hear nothing,
+         which is why pointing it is a skill.
+
+         `beam: "all"` is the other truth about a real room - the flash
+         bounces off the walls and the ceiling and everything hears it.
+         One dropdown, both lessons. */
+      case "ir": {
+        const key = IR_BY_ID[String(m.key)];
+        if (!key) return 0;
+        const from = { x: m.x, y: m.y };
+        const pointed = m.beam !== "all";
+        let heard = 0;
+        for (const [id, k] of kit) {
+          if (!k.chassis.fitted("ir")) continue;
+          const b = env.bodyOf(id);
+          if (!b) continue;
+          const dx = b.x - from.x, dy = b.y - from.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > IR_REACH) continue;
+          if (pointed) {
+            let off = Math.atan2(dy, dx) - (m.h || 0);
+            while (off > Math.PI) off -= 2 * Math.PI;
+            while (off < -Math.PI) off += 2 * Math.PI;
+            if (Math.abs(off) > IR_CONE) continue;
+            /* and something in the way stops it, exactly as it stops
+               the sonar - the same raycast, for the same reason */
+            const r = b.r || 62;
+            const hit = env.raycast(from, Math.atan2(dy, dx), { reach: dist + 10 });
+            if (isFinite(hit) && hit < dist - r - 2) continue;
+          }
+          k.chassis.show().ir = { code: key.code, key: key.id, at: clock.now };
+          k.machine.fire("ir:" + key.id);
+          k.machine.fire("ir:Any");
+          heard++;
+        }
+        return heard;
+      }
+
       case "group":   { const k = kit.get(m.id); return k ? k.board.group(m.group) : false; }
       case "screen":  { const k = kit.get(m.id); if (!k) return false;
                         if (m.text != null) k.board.screen.leds(m.text);
@@ -605,10 +683,17 @@ export function createRoom(options) {
     s.bodies = s.bodies.map(b => {
       const got = senses.get(b.id);
       const k = kit.get(b.id);
+      /* one copy of the chassis, not three: `state()` deep-copies the
+         pixels and the add-on displays, and taking it twice was both
+         wasteful and a way for the card to see two different moments */
+      const cs = k ? k.chassis.state() : null;
       const prog = k ? { state: k.machine.state(), stopwatch: k.machine.stopwatch(),
                          plugged: k.machine.plugged(), armed: k.machine.armed().length,
                          name: k.machine.name(), kind: k.device,
-                         pixels: k.chassis.state().pixels, model: k.chassis.model() } : null;
+                         pixels: cs.pixels, model: cs.model,
+                         /* what is bolted on, and what it is showing: the
+                            card draws an add-on only when it is fitted */
+                         fit: cs.fit, show: cs.show } : null;
       return got ? { ...b, senses: got.senses, reads: got.reads,
                      screen: got.screen, board: got.board, program: prog } : b;
     });

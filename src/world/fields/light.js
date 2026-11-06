@@ -129,10 +129,10 @@ export function createLight(scene, bodies) {
   /* What this lamp can see, given the things it cannot see past. The room's
      own edge is included or the polygon would be unbounded. */
   function visibility(src, walls) {
-    const S = scene.size, pad = 50;
+    const W = scene.w, H = scene.h, pad = 50;
     const segs = [
-      [[-pad, -pad], [S + pad, -pad]], [[S + pad, -pad], [S + pad, S + pad]],
-      [[S + pad, S + pad], [-pad, S + pad]], [[-pad, S + pad], [-pad, -pad]]
+      [[-pad, -pad], [W + pad, -pad]], [[W + pad, -pad], [W + pad, H + pad]],
+      [[W + pad, H + pad], [-pad, H + pad]], [[-pad, H + pad], [-pad, -pad]]
     ];
     for (const c of walls) {
       const v = boxCorners(c.box);
@@ -228,7 +228,7 @@ export function createLight(scene, bodies) {
      adds nothing to the glow of a room that anyone could measure, and a
      solve per frame of a drag is not affordable. */
   function shapeKey() {
-    let k = scene.size + "|" + scene.ground.material + "|" + (scene.sun ? "sun" : "-") +
+    let k = scene.w + "x" + scene.h + "|" + scene.ground.material + "|" + (scene.sun ? "sun" : "-") +
             "|" + (scene.sky.walls == null ? 0.5 : scene.sky.walls);
     for (const f of scene.furniture)
       k += "|F" + Math.round(f.x) + "," + Math.round(f.y) + "," + f.w + "," + f.h +
@@ -289,7 +289,7 @@ export function createLight(scene, bodies) {
     return profiles[i];
   }
   function profileOf(src) {
-    const reach = scene.size * 1.5, out = [];
+    const reach = scene.span * 1.5, out = [];
     for (let k = 0; k <= PROFILE_STEPS; k++) {
       const d = reach * k / PROFILE_STEPS;
       let sum = 0;
